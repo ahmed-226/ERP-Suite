@@ -38,6 +38,7 @@ import {
   SYSTEM_ACCOUNT_CODES,
 } from '@erp/shared';
 import { DataError } from '../errors';
+import type { AdminUser, AssignRoleInput, RoleInfo } from '@erp/shared';
 
 interface StockRow {
   stockId: string;
@@ -93,6 +94,7 @@ export class MockStore {
   private stock: StockRow[];
   private movements: MovementRow[];
   private journals: JournalEntry[];
+  private users: { userId: string; roleCode: string; isActive: boolean }[];
 
   private currentUserId: string | null = null;
   private journalCounter = seed.journals.length;
@@ -125,6 +127,7 @@ export class MockStore {
     }));
     this.movements = seed.movements.map((m) => ({ ...m }));
     this.journals = seed.journals.map((j) => this.buildEntry(j));
+    this.users = seed.users.map((u) => ({ userId: u.userId, roleCode: u.roleCode, isActive: true }));
 
     this.restoreSession();
   }
@@ -177,6 +180,55 @@ export class MockStore {
   /** Display name for a user id, used on audit columns. */
   private userName(userId: string): string {
     return seed.users.find((u) => u.userId === userId)?.fullName ?? userId;
+  }
+
+  private roleById(roleId: string): (typeof seed.roles)[number] {
+    const role = seed.roles.find((r) => r.roleId === roleId);
+    if (!role) throw new DataError('ROLE_NOT_FOUND', 'Role not found', 404);
+    return role;
+  }
+
+  private toAdminUser(user: { userId: string; roleCode: string; isActive: boolean }): AdminUser {
+    const seedUser = seed.users.find((u) => u.userId === user.userId);
+    if (!seedUser) throw new DataError('USER_NOT_FOUND', 'User not found', 404);
+    const role = seed.roles.find((r) => r.code === user.roleCode);
+    return {
+      userId: seedUser.userId,
+      companyId: seedUser.companyId,
+      email: seedUser.email,
+      fullName: seedUser.fullName,
+      isActive: user.isActive,
+      roles: role
+        ? [{ roleId: role.roleId, code: role.code, name: role.name, permissions: [...role.permissions] }]
+        : [],
+    };
+  }
+
+  async listUsers(): Promise<AdminUser[]> {
+    await this.wait();
+    return this.users
+      .map((u) => this.toAdminUser(u))
+      .sort((a, b) => a.email.localeCompare(b.email));
+  }
+
+  async listRoles(): Promise<RoleInfo[]> {
+    await this.wait();
+    return seed.roles.map((r) => ({
+      roleId: r.roleId,
+      code: r.code,
+      name: r.name,
+      permissions: [...r.permissions],
+    }));
+  }
+
+  async assignRole(userId: string, input: AssignRoleInput): Promise<AdminUser> {
+    await this.wait();
+    this.requireActor();
+    const role = this.roleById(input.roleId);
+    const user = this.users.find((u) => u.userId === userId);
+    if (!user) throw new DataError('USER_NOT_FOUND', 'User not found', 404);
+    user.roleCode = role.code;
+    return this.toAdminUser(user);
   }
 
   async login(input: LoginInput): Promise<LoginResponse> {

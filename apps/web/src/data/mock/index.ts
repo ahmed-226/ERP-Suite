@@ -53,6 +53,11 @@ export function createMockDataSource(options: { latency?: number } = {}): DataSo
       trialBalance: (filter) => store.trialBalance(filter),
       dashboard: () => store.dashboard(),
     },
+    users: {
+      list: () => store.listUsers(),
+      listRoles: () => store.listRoles(),
+      assignRole: (userId, input) => store.assignRole(userId, input),
+    },
   };
 }
 

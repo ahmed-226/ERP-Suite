@@ -2,6 +2,8 @@ import type {
   Account,
   AccountFilter,
   AdjustmentInput,
+  AdminUser,
+  AssignRoleInput,
   AuthUser,
   CreateAccountInput,
   CreateJournalInput,
@@ -19,6 +21,7 @@ import type {
   Product,
   ProductFilter,
   ReceiptInput,
+  RoleInfo,
   StockFilter,
   TransferInput,
   TrialBalanceFilter,
@@ -91,6 +94,12 @@ export interface ReportsApi {
   dashboard(): Promise<DashboardStats>;
 }
 
+export interface UsersApi {
+  list(): Promise<AdminUser[]>;
+  listRoles(): Promise<RoleInfo[]>;
+  assignRole(userId: string, input: AssignRoleInput): Promise<AdminUser>;
+}
+
 export interface DataSource {
   auth: AuthApi;
   accounts: AccountsApi;
@@ -99,4 +108,5 @@ export interface DataSource {
   warehouses: WarehousesApi;
   inventory: InventoryApi;
   reports: ReportsApi;
+  users: UsersApi;
 }
