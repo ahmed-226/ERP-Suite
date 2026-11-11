@@ -1,6 +1,7 @@
 {
   "name": "erp",
   "private": true,
+  "type": "module",
   "version": "0.1.0",
   "description": "Traditional ERP suite (learning project) - client-first build",
   "workspaces": [
