@@ -8,6 +8,9 @@
     "packages/*"
   ],
   "scripts": {
+    "infra:up": "wsl -e bash -lc \"cd /mnt/d/SW/repos/ERP && docker compose up -d\"",
+    "infra:down": "wsl -e bash -lc \"cd /mnt/d/SW/repos/ERP && docker compose down\"",
+    "infra:ps": "wsl -e bash -lc \"cd /mnt/d/SW/repos/ERP && docker compose ps\"",
     "dev": "npm run dev -w apps/web",
     "build": "npm run build -w apps/web",
     "typecheck": "npm run typecheck --workspaces --if-present",
