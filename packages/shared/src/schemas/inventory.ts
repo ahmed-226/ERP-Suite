@@ -73,6 +73,7 @@ export interface InventoryTransaction {
   unitCost: number;
   referenceId: string | null;
   createdBy: string;
+  createdByName: string;
   createdAt: string;
 }
 

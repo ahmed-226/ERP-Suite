@@ -703,6 +703,7 @@ export class MockStore {
       unitCost: row.unitCost,
       referenceId: row.referenceId,
       createdBy: row.createdBy,
+      createdByName: this.userName(row.createdBy),
       createdAt: row.createdAt,
     };
   }
