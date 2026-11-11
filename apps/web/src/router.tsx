@@ -1,12 +1,19 @@
 import { createBrowserRouter, Navigate } from 'react-router-dom';
+import { RequireAuth } from '@/auth/RequireAuth';
 import { AppShell } from '@/layouts/AppShell';
+import LoginPage from '@/pages/LoginPage';
 import DashboardPage from '@/pages/Dashboard';
 import PlaceholderPage from '@/pages/Placeholder';
 
 export const router = createBrowserRouter([
+  { path: '/login', element: <LoginPage /> },
   {
     path: '/',
-    element: <AppShell />,
+    element: (
+      <RequireAuth>
+        <AppShell />
+      </RequireAuth>
+    ),
     children: [
       { index: true, element: <Navigate to="/dashboard" replace /> },
       { path: 'dashboard', element: <DashboardPage /> },
