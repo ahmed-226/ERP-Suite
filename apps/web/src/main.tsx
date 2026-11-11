@@ -8,6 +8,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider } from 'react-router-dom';
 
 import { AuthProvider } from '@/auth/AuthContext';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { queryClient } from '@/lib/queryClient';
 import { router } from '@/router';
 import { theme } from '@/theme';
@@ -17,14 +18,16 @@ if (!container) throw new Error('Root element #root not found');
 
 ReactDOM.createRoot(container).render(
   <React.StrictMode>
-    <ConfigProvider theme={theme}>
-      <AntApp>
-        <QueryClientProvider client={queryClient}>
-          <AuthProvider>
-            <RouterProvider router={router} />
-          </AuthProvider>
-        </QueryClientProvider>
-      </AntApp>
-    </ConfigProvider>
+    <ErrorBoundary>
+      <ConfigProvider theme={theme}>
+        <AntApp>
+          <QueryClientProvider client={queryClient}>
+            <AuthProvider>
+              <RouterProvider router={router} />
+            </AuthProvider>
+          </QueryClientProvider>
+        </AntApp>
+      </ConfigProvider>
+    </ErrorBoundary>
   </React.StrictMode>,
 );
