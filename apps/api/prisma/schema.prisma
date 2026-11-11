@@ -1,0 +1,272 @@
+// Prisma 7 with the `pg` driver adapter.
+//
+// IMPORTANT: the connection URL intentionally lives in TWO places — neither of
+// them is here:
+//   1. `prisma.config.ts`  → used by the CLI (migrate, seed, studio)
+//   2. `src/db/db.ts`      → used at runtime, passed to the `PrismaPg` adapter
+// Putting a `url` in the datasource block below is the classic Prisma 7
+// misconfiguration and is not needed (nor valid) in this setup.
+//
+// Column/table names stay snake_case (see dev/docs/erd.md) so the raw-SQL
+// integrity migrations (CHECKs, triggers) can reference them directly.
+// Every business table carries `company_id` for tenant isolation.
+// Extra CHECK constraints and triggers live in `prisma/migrations/*_integrity`.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+}
+
+enum JournalStatus {
+  DRAFT
+  POSTED
+  VOIDED
+}
+
+enum EntryType {
+  DEBIT
+  CREDIT
+}
+
+enum MovementType {
+  GOODS_RECEIPT
+  SALES_ISSUE
+  TRANSFER_IN
+  TRANSFER_OUT
+  ADJUSTMENT
+}
+
+model Company {
+  companyId  String   @id @default(uuid()) @map("company_id") @db.Uuid
+  name       String   @db.VarChar(200)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  users                User[]
+  roles                Role[]
+  accounts             ChartOfAccount[]
+  warehouses           Warehouse[]
+  products             Product[]
+  journalEntries       JournalEntry[]
+  stock                InventoryStock[]
+  inventoryTransactions InventoryTransaction[]
+
+  @@map("companies")
+}
+
+model User {
+  userId       String   @id @default(uuid()) @map("user_id") @db.Uuid
+  companyId    String   @map("company_id") @db.Uuid
+  email        String   @db.VarChar(255)
+  passwordHash String   @map("password_hash") @db.VarChar(100)
+  fullName     String   @map("full_name") @db.VarChar(150)
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company    Company           @relation(fields: [companyId], references: [companyId], onDelete: Restrict)
+  roles      UserRole[]
+  journals   JournalEntry[]    @relation("journal_created_by")
+  movements  InventoryTransaction[] @relation("movement_created_by")
+
+  @@unique([companyId, email])
+  @@index([companyId])
+  @@map("users")
+}
+
+model Role {
+  roleId    String   @id @default(uuid()) @map("role_id") @db.Uuid
+  companyId String   @map("company_id") @db.Uuid
+  code      String   @db.VarChar(50)
+  name      String   @db.VarChar(100)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company     Company           @relation(fields: [companyId], references: [companyId], onDelete: Restrict)
+  users       UserRole[]
+  permissions RolePermission[]
+
+  @@unique([companyId, code])
+  @@index([companyId])
+  @@map("roles")
+}
+
+/// Global catalog (not tenant-scoped): `accounts:read`, `inventory:write`, ...
+model Permission {
+  permissionId String   @id @default(uuid()) @map("permission_id") @db.Uuid
+  code         String   @unique @db.VarChar(50)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  roles RolePermission[]
+
+  @@map("permissions")
+}
+
+model UserRole {
+  userId String @map("user_id") @db.Uuid
+  roleId String @map("role_id") @db.Uuid
+
+  user User @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [roleId], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+model RolePermission {
+  roleId       String @map("role_id") @db.Uuid
+  permissionId String @map("permission_id") @db.Uuid
+
+  role       Role       @relation(fields: [roleId], references: [roleId], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [permissionId], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model ChartOfAccount {
+  accountId       String       @id @default(uuid()) @map("account_id") @db.Uuid
+  companyId       String       @map("company_id") @db.Uuid
+  accountCode     String       @map("account_code") @db.VarChar(30)
+  accountName     String       @map("account_name") @db.VarChar(100)
+  accountType     AccountType  @map("account_type")
+  parentAccountId String?      @map("parent_account_id") @db.Uuid
+  isActive        Boolean      @default(true) @map("is_active")
+  createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company Company           @relation(fields: [companyId], references: [companyId], onDelete: Restrict)
+  parent  ChartOfAccount?   @relation("account_parent", fields: [parentAccountId], references: [accountId], onDelete: Restrict)
+  children ChartOfAccount[] @relation("account_parent")
+  journalLines JournalEntryLine[]
+
+  @@unique([companyId, accountCode])
+  @@index([accountCode])
+  @@map("chart_of_accounts")
+}
+
+model JournalEntry {
+  entryId       String        @id @default(uuid()) @map("entry_id") @db.Uuid
+  companyId     String        @map("company_id") @db.Uuid
+  entryNumber   String        @map("entry_number") @db.VarChar(50)
+  entryDate     DateTime      @map("entry_date") @db.Date
+  referenceType String?       @map("reference_type") @db.VarChar(50)
+  referenceId   String?       @map("reference_id") @db.Uuid
+  status        JournalStatus @default(DRAFT)
+  postedAt      DateTime?     @map("posted_at") @db.Timestamptz(6)
+  createdBy     String        @map("created_by") @db.Uuid
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company Company             @relation(fields: [companyId], references: [companyId], onDelete: Restrict)
+  createdByUser User            @relation("journal_created_by", fields: [createdBy], references: [userId], onDelete: Restrict)
+  lines   JournalEntryLine[]
+
+  @@unique([companyId, entryNumber])
+  @@index([entryDate, status])
+  @@map("journal_entries")
+}
+
+model JournalEntryLine {
+  lineId      String    @id @default(uuid()) @map("line_id") @db.Uuid
+  entryId     String    @map("entry_id") @db.Uuid
+  accountId   String    @map("account_id") @db.Uuid
+  entryType   EntryType @map("entry_type")
+  amount      Decimal   @db.Decimal(15, 4)
+  description String?
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  entry   JournalEntry   @relation(fields: [entryId], references: [entryId], onDelete: Cascade)
+  account ChartOfAccount @relation(fields: [accountId], references: [accountId], onDelete: Restrict)
+
+  @@index([entryId])
+  @@index([accountId])
+  @@map("journal_entry_lines")
+}
+
+model Warehouse {
+  warehouseId     String   @id @default(uuid()) @map("warehouse_id") @db.Uuid
+  companyId       String   @map("company_id") @db.Uuid
+  code            String   @db.VarChar(20)
+  name            String   @db.VarChar(100)
+  locationAddress String?  @map("location_address")
+  isActive        Boolean  @default(true) @map("is_active")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company    Company                @relation(fields: [companyId], references: [companyId], onDelete: Restrict)
+  stock      InventoryStock[]
+  movements  InventoryTransaction[]
+
+  @@unique([companyId, code])
+  @@index([code])
+  @@map("warehouses")
+}
+
+model Product {
+  productId        String   @id @default(uuid()) @map("product_id") @db.Uuid
+  companyId        String   @map("company_id") @db.Uuid
+  sku              String   @db.VarChar(50)
+  name             String   @db.VarChar(150)
+  description      String?
+  unitOfMeasure    String   @default("PCS") @map("unit_of_measure") @db.VarChar(20)
+  reorderThreshold Int      @default(10) @map("reorder_threshold")
+  isActive         Boolean  @default(true) @map("is_active")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company   Company                @relation(fields: [companyId], references: [companyId], onDelete: Restrict)
+  stock     InventoryStock[]
+  movements InventoryTransaction[]
+
+  @@unique([companyId, sku])
+  @@index([sku])
+  @@map("products")
+}
+
+/// Aggregate state per (product, warehouse); rows are created lazily on first
+/// movement. `quantity_on_hand >= 0` is enforced by a CHECK in the migrations.
+model InventoryStock {
+  stockId          String   @id @default(uuid()) @map("stock_id") @db.Uuid
+  companyId        String   @map("company_id") @db.Uuid
+  productId        String   @map("product_id") @db.Uuid
+  warehouseId      String   @map("warehouse_id") @db.Uuid
+  quantityOnHand   Int      @default(0) @map("quantity_on_hand")
+  quantityReserved Int      @default(0) @map("quantity_reserved")
+  updatedAt        DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  company   Company   @relation(fields: [companyId], references: [companyId], onDelete: Restrict)
+  product   Product   @relation(fields: [productId], references: [productId], onDelete: Restrict)
+  warehouse Warehouse @relation(fields: [warehouseId], references: [warehouseId], onDelete: Restrict)
+
+  @@unique([productId, warehouseId])
+  @@index([companyId])
+  @@map("inventory_stock")
+}
+
+/// Append-only audit ledger (UPDATE/DELETE blocked by trigger in migrations).
+model InventoryTransaction {
+  transactionId String        @id @default(uuid()) @map("transaction_id") @db.Uuid
+  companyId     String        @map("company_id") @db.Uuid
+  productId     String        @map("product_id") @db.Uuid
+  warehouseId   String        @map("warehouse_id") @db.Uuid
+  movementType  MovementType  @map("movement_type")
+  quantity      Int
+  unitCost      Decimal       @map("unit_cost") @db.Decimal(15, 4)
+  referenceId   String?       @map("reference_id") @db.Uuid
+  createdBy     String        @map("created_by") @db.Uuid
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company        Company   @relation(fields: [companyId], references: [companyId], onDelete: Restrict)
+  product        Product   @relation(fields: [productId], references: [productId], onDelete: Restrict)
+  warehouse      Warehouse @relation(fields: [warehouseId], references: [warehouseId], onDelete: Restrict)
+  createdByUser  User      @relation("movement_created_by", fields: [createdBy], references: [userId], onDelete: Restrict)
+
+  @@index([productId, warehouseId, createdAt(sort: Desc)])
+  @@map("inventory_transactions")
+}
