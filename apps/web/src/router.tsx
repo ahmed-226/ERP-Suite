@@ -4,6 +4,9 @@ import { AppShell } from '@/layouts/AppShell';
 import LoginPage from '@/pages/LoginPage';
 import DashboardPage from '@/pages/Dashboard';
 import PlaceholderPage from '@/pages/Placeholder';
+import AccountsPage from '@/pages/accounts';
+import ProductsPage from '@/pages/products';
+import WarehousesPage from '@/pages/warehouses';
 
 export const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
@@ -20,7 +23,7 @@ export const router = createBrowserRouter([
 
       {
         path: 'accounting/accounts',
-        element: <PlaceholderPage title="Chart of Accounts" phase="A5" />,
+        element: <AccountsPage />,
       },
       {
         path: 'accounting/journals',
@@ -33,11 +36,11 @@ export const router = createBrowserRouter([
 
       {
         path: 'inventory/products',
-        element: <PlaceholderPage title="Products" phase="A5" />,
+        element: <ProductsPage />,
       },
       {
         path: 'inventory/warehouses',
-        element: <PlaceholderPage title="Warehouses" phase="A5" />,
+        element: <WarehousesPage />,
       },
       {
         path: 'inventory/stock',
