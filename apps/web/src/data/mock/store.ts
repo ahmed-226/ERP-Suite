@@ -174,6 +174,11 @@ export class MockStore {
     };
   }
 
+  /** Display name for a user id, used on audit columns. */
+  private userName(userId: string): string {
+    return seed.users.find((u) => u.userId === userId)?.fullName ?? userId;
+  }
+
   async login(input: LoginInput): Promise<LoginResponse> {
     await this.wait();
     const user = seed.users.find((u) => u.email.toLowerCase() === input.email.toLowerCase());
@@ -332,6 +337,7 @@ export class MockStore {
       status: j.status,
       postedAt: j.postedAt,
       createdBy: j.createdBy,
+      createdByName: this.userName(j.createdBy),
       createdAt: j.createdAt,
       lines,
       ...this.totals(lines),
@@ -405,6 +411,7 @@ export class MockStore {
       status: input.status,
       postedAt: input.status === 'POSTED' ? new Date().toISOString() : null,
       createdBy: this.currentUserId ?? seed.users[0].userId,
+      createdByName: this.userName(this.currentUserId ?? seed.users[0].userId),
       createdAt: new Date().toISOString(),
       lines,
       ...this.totals(lines),

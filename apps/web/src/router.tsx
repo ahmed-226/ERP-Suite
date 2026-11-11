@@ -7,6 +7,9 @@ import PlaceholderPage from '@/pages/Placeholder';
 import AccountsPage from '@/pages/accounts';
 import ProductsPage from '@/pages/products';
 import WarehousesPage from '@/pages/warehouses';
+import JournalsPage from '@/pages/journals';
+import JournalEditorPage from '@/pages/journals/JournalEditorPage';
+import TrialBalancePage from '@/pages/trialBalance';
 
 export const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
@@ -27,11 +30,19 @@ export const router = createBrowserRouter([
       },
       {
         path: 'accounting/journals',
-        element: <PlaceholderPage title="Journal Entries" phase="A6" />,
+        element: <JournalsPage />,
+      },
+      {
+        path: 'accounting/journals/new',
+        element: <JournalEditorPage />,
+      },
+      {
+        path: 'accounting/journals/:entryId/edit',
+        element: <JournalEditorPage />,
       },
       {
         path: 'accounting/trial-balance',
-        element: <PlaceholderPage title="Trial Balance" phase="A6" />,
+        element: <TrialBalancePage />,
       },
 
       {

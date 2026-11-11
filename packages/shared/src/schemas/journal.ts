@@ -42,6 +42,7 @@ export interface JournalEntry {
   status: JournalStatus;
   postedAt: string | null;
   createdBy: string;
+  createdByName: string;
   createdAt: string;
   lines: JournalEntryLine[];
   totalDebit: number;
