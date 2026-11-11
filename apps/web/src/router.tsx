@@ -10,6 +10,9 @@ import WarehousesPage from '@/pages/warehouses';
 import JournalsPage from '@/pages/journals';
 import JournalEditorPage from '@/pages/journals/JournalEditorPage';
 import TrialBalancePage from '@/pages/trialBalance';
+import StockPage from '@/pages/stock';
+import MovementsPage from '@/pages/movements';
+import InventoryOperationsPage from '@/pages/operations';
 
 export const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
@@ -55,15 +58,15 @@ export const router = createBrowserRouter([
       },
       {
         path: 'inventory/stock',
-        element: <PlaceholderPage title="Stock Levels" phase="A7" />,
+        element: <StockPage />,
       },
       {
         path: 'inventory/movements',
-        element: <PlaceholderPage title="Inventory Movements" phase="A7" />,
+        element: <MovementsPage />,
       },
       {
         path: 'inventory/operations',
-        element: <PlaceholderPage title="Inventory Operations" phase="A7" />,
+        element: <InventoryOperationsPage />,
       },
 
       {
