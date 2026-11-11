@@ -13,6 +13,7 @@ import TrialBalancePage from '@/pages/trialBalance';
 import StockPage from '@/pages/stock';
 import MovementsPage from '@/pages/movements';
 import InventoryOperationsPage from '@/pages/operations';
+import SettingsPage from '@/pages/settings';
 
 export const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
@@ -71,7 +72,7 @@ export const router = createBrowserRouter([
 
       {
         path: 'settings/access',
-        element: <PlaceholderPage title="Users & Roles" phase="A8" />,
+        element: <SettingsPage />,
       },
 
       { path: '*', element: <PlaceholderPage title="Page not found" phase="—" /> },
