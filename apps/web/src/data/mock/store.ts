@@ -72,6 +72,8 @@ const uid = (): string => globalThis.crypto.randomUUID();
 const today = (): string => new Date().toISOString().slice(0, 10);
 const round = (n: number): number => Math.round(n * 10000) / 10000;
 
+const SESSION_STORAGE_KEY = 'erp.mock.currentUserId';
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -92,7 +94,7 @@ export class MockStore {
   private movements: MovementRow[];
   private journals: JournalEntry[];
 
-  private currentUserId: string | null = seed.users[0].userId;
+  private currentUserId: string | null = null;
   private journalCounter = seed.journals.length;
 
   constructor(options: { latency?: number } = {}) {
@@ -123,6 +125,8 @@ export class MockStore {
     }));
     this.movements = seed.movements.map((m) => ({ ...m }));
     this.journals = seed.journals.map((j) => this.buildEntry(j));
+
+    this.restoreSession();
   }
 
   private async wait(): Promise<void> {
@@ -130,6 +134,30 @@ export class MockStore {
   }
 
   // ---------------------------------------------------------------- auth
+
+  /** The signed-in user id survives page reloads so the SPA keeps its session. */
+  private restoreSession(): void {
+    try {
+      const stored = globalThis.localStorage?.getItem(SESSION_STORAGE_KEY);
+      if (stored && seed.users.some((u) => u.userId === stored)) {
+        this.currentUserId = stored;
+      }
+    } catch {
+      // Storage unavailable (e.g. some test environments) - stay signed out.
+    }
+  }
+
+  private persistSession(): void {
+    try {
+      if (this.currentUserId) {
+        globalThis.localStorage?.setItem(SESSION_STORAGE_KEY, this.currentUserId);
+      } else {
+        globalThis.localStorage?.removeItem(SESSION_STORAGE_KEY);
+      }
+    } catch {
+      // Best-effort persistence; the in-memory state stays authoritative.
+    }
+  }
 
   private authUser(userId: string): AuthUser {
     const user = seed.users.find((u) => u.userId === userId);
@@ -153,6 +181,7 @@ export class MockStore {
       throw new DataError('INVALID_CREDENTIALS', 'Incorrect email or password', 401);
     }
     this.currentUserId = user.userId;
+    this.persistSession();
     return {
       accessToken: `mock-access.${user.userId}`,
       refreshToken: `mock-refresh.${user.userId}`,
@@ -163,6 +192,7 @@ export class MockStore {
   async logout(): Promise<void> {
     await this.wait();
     this.currentUserId = null;
+    this.persistSession();
   }
 
   async me(): Promise<AuthUser> {

@@ -1,20 +1,26 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { seed } from '@erp/shared';
 import { MockStore } from './store';
 
-const companyAccounts = seed.accounts;
-const [cash, , , inventory, accountsPayable, , , cogs] = companyAccounts;
+const [cash, , , inventory, accountsPayable, , , cogs] = seed.accounts;
 const mainWarehouse = seed.warehouses[0].warehouseId;
 const secondaryWarehouse = seed.warehouses[1].warehouseId;
 const [mouse, , monitor] = seed.products;
 
-function newStore(): MockStore {
-  return new MockStore({ latency: 0 });
+/** Every mutation requires a signed-in actor, so tests log in as the admin. */
+async function newStore(): Promise<MockStore> {
+  const store = new MockStore({ latency: 0 });
+  await store.login({ email: 'admin@acme.test', password: 'Passw0rd!' });
+  return store;
 }
+
+beforeEach(() => {
+  localStorage.clear();
+});
 
 describe('MockStore journal invariants', () => {
   it('refuses to post an unbalanced entry', async () => {
-    const store = newStore();
+    const store = await newStore();
     const entry = await store.createJournal({
       entryDate: '2026-02-01',
       lines: [
@@ -29,7 +35,7 @@ describe('MockStore journal invariants', () => {
   });
 
   it('posts a balanced entry and keeps the trial balance at zero', async () => {
-    const store = newStore();
+    const store = await newStore();
     const entry = await store.createJournal({
       entryDate: '2026-02-01',
       lines: [
@@ -46,7 +52,7 @@ describe('MockStore journal invariants', () => {
   });
 
   it('will not edit a posted entry', async () => {
-    const store = newStore();
+    const store = await newStore();
     const [postedEntry] = await store.listJournals({ status: 'POSTED' });
     await expect(
       store.updateJournal(postedEntry.entryId, { entryDate: '2026-03-01' }),
@@ -56,14 +62,14 @@ describe('MockStore journal invariants', () => {
 
 describe('MockStore inventory invariants', () => {
   it('blocks an issue larger than the stock on hand', async () => {
-    const store = newStore();
+    const store = await newStore();
     await expect(
       store.issue({ productId: monitor.productId, warehouseId: mainWarehouse, quantity: 5 }),
     ).rejects.toMatchObject({ code: 'INSUFFICIENT_STOCK' });
   });
 
   it('receives stock and records a balanced journal entry', async () => {
-    const store = newStore();
+    const store = await newStore();
     const before = (await store.listStock({ productId: mouse.productId, warehouseId: mainWarehouse }))[0];
 
     const movement = await store.receipt({
@@ -86,7 +92,7 @@ describe('MockStore inventory invariants', () => {
   });
 
   it('transfers stock between warehouses', async () => {
-    const store = newStore();
+    const store = await newStore();
     const [out, into] = await store.transfer({
       productId: mouse.productId,
       fromWarehouseId: mainWarehouse,
