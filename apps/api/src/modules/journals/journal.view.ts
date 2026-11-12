@@ -67,3 +67,17 @@ export function entryWhere(companyId: string, filter: JournalFilter) {
       : {}),
   };
 }
+
+/** JE-0001, JE-0002, ... per company, from the current highest suffix. */
+export async function nextEntryNumber(
+  tx: { $queryRaw: (query: TemplateStringsArray, ...values: unknown[]) => Promise<unknown[]>; $executeRaw: (query: TemplateStringsArray, ...values: unknown[]) => Promise<unknown> },
+  companyId: string,
+): Promise<string> {
+  // Serialize entry-number allocation per company (concurrent receipts and
+  // manual entries would otherwise race on max(entry_number)).
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('erp-entry-number'), hashtext(${companyId}))`;
+  const rows = await tx.$queryRaw`SELECT coalesce(max((substring(entry_number from 'JE-([0-9]+)$'))::bigint), 0) AS max
+    FROM journal_entries WHERE company_id::text = ${companyId}`;
+  const max = Number((rows[0] as { max: bigint | number } | undefined)?.max ?? 0);
+  return `JE-${String(max + 1).padStart(4, '0')}`;
+}

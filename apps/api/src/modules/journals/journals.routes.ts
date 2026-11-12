@@ -7,7 +7,7 @@ import {
 import { prisma } from '../../db/db';
 import { ApiError, notFound } from '../../lib/errors';
 import { requireAuth, requirePermission } from '../../middleware/auth';
-import { entryInclude, entryWhere, serializeEntry } from './journal.view';
+import { entryInclude, entryWhere, nextEntryNumber, serializeEntry } from './journal.view';
 
 export const journalRouter = Router();
 
@@ -156,14 +156,3 @@ journalRouter.post('/:entryId/void', requirePermission('journals:post'), async (
   });
   res.status(200).json(serializeEntry(entry));
 });
-
-/** JE-0001, JE-0002, ... per company, from the current highest suffix. */
-async function nextEntryNumber(
-  tx: { $queryRaw: (query: TemplateStringsArray, ...values: unknown[]) => Promise<unknown[]> },
-  companyId: string,
-): Promise<string> {
-  const rows = await tx.$queryRaw`SELECT coalesce(max((substring(entry_number from 'JE-([0-9]+)$'))::bigint), 0) AS max
-    FROM journal_entries WHERE company_id::text = ${companyId}`;
-  const max = Number((rows[0] as { max: bigint | number } | undefined)?.max ?? 0);
-  return `JE-${String(max + 1).padStart(4, '0')}`;
-}

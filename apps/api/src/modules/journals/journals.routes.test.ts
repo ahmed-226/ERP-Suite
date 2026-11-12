@@ -119,6 +119,8 @@ describe('journals lifecycle', () => {
       .set(auth(accountant));
     const beforeDebit =
       before.body.find((r: { accountCode: string }) => r.accountCode === '1200')?.debit ?? 0;
+    const beforeCredit =
+      before.body.find((r: { accountCode: string }) => r.accountCode === '1200')?.credit ?? 0;
 
     const created = await request(app)
       .post('/api/v1/journals')
@@ -140,7 +142,7 @@ describe('journals lifecycle', () => {
     expect(res.status).toBe(200);
     const inventory = res.body.find((r: { accountCode: string }) => r.accountCode === '1200');
     expect(inventory.debit).toBe(beforeDebit + 50); // only the new POSTED entry counts
-    expect(inventory.credit).toBe(0);
+    expect(inventory.credit).toBe(beforeCredit);
   });
 
   it('storekeeper cannot create journals', async () => {

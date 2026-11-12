@@ -17,6 +17,7 @@ import {
   stockInclude,
   type PrismaTx,
 } from './inventory.view';
+import { postInventoryJournal, systemAccountIds } from '../integration/gl-posting';
 
 export const inventoryRouter = Router();
 
@@ -133,7 +134,7 @@ inventoryRouter.post('/receipts', requirePermission('inventory:write'), async (r
       warehouseId: input.warehouseId,
       quantityDelta: input.quantity,
     });
-    return recordMovement(tx, {
+    const created = await recordMovement(tx, {
       companyId,
       productId: input.productId,
       warehouseId: input.warehouseId,
@@ -143,6 +144,21 @@ inventoryRouter.post('/receipts', requirePermission('inventory:write'), async (r
       referenceId: input.referenceId ?? null,
       userId: req.user!.userId,
     });
+    // Inventory → GL (WORKFLOWS.md §7): DR Inventory / CR Accounts Payable.
+    if (input.quantity * input.unitCost > 0) {
+      const accounts = await systemAccountIds(tx, companyId);
+      await postInventoryJournal(tx, {
+        companyId,
+        userId: req.user!.userId,
+        entryDate: new Date(),
+        referenceType: 'INVENTORY_RECEIPT',
+        referenceId: created.transactionId,
+        debitAccountId: accounts.inventory,
+        creditAccountId: accounts.accountsPayable,
+        amount: input.quantity * input.unitCost,
+      });
+    }
+    return created;
   });
   res.status(201).json(serializeMovement(movement));
 });
@@ -161,7 +177,7 @@ inventoryRouter.post('/issues', requirePermission('inventory:write'), async (req
       warehouseId: input.warehouseId,
       quantityDelta: -input.quantity,
     });
-    return recordMovement(tx, {
+    const created = await recordMovement(tx, {
       companyId,
       productId: input.productId,
       warehouseId: input.warehouseId,
@@ -171,6 +187,22 @@ inventoryRouter.post('/issues', requirePermission('inventory:write'), async (req
       referenceId: input.referenceId ?? null,
       userId: req.user!.userId,
     });
+    // Inventory → GL (WORKFLOWS.md §8): DR COGS / CR Inventory.
+    const cost = input.unitCost ?? 0;
+    if (input.quantity * cost > 0) {
+      const accounts = await systemAccountIds(tx, companyId);
+      await postInventoryJournal(tx, {
+        companyId,
+        userId: req.user!.userId,
+        entryDate: new Date(),
+        referenceType: 'SALES_ISSUE',
+        referenceId: created.transactionId,
+        debitAccountId: accounts.costOfGoodsSold,
+        creditAccountId: accounts.inventory,
+        amount: input.quantity * cost,
+      });
+    }
+    return created;
   });
   res.status(201).json(serializeMovement(movement));
 });
