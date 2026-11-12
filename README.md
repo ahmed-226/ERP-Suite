@@ -96,3 +96,10 @@ envelope: `{ "error": { "code": "...", "message": "...", "details": ... } }`.
 | --- | --- | --- |
 | GET | `/reports/dashboard` | Counts, low-stock items, and recent journal entries. |
 | GET | `/health` | Service liveness and dependency health. |
+
+### Users & Roles
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| GET | `/users` | List users with their roles and permissions. |
+| GET | `/users/roles` | List the company's roles with their permissions. |
+| POST | `/users/:id/role` | Assign a role to a user (replaces the current one). |
