@@ -1,9 +1,107 @@
 # ERP Suite
 
+![Node.js](https://img.shields.io/badge/Node.js-20%2B-339933?logo=node.js&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
+![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
+![Ant Design](https://img.shields.io/badge/Ant_Design-5-0170FE?logo=antdesign&logoColor=white)
+![Vite](https://img.shields.io/badge/Vite-6-646CFF?logo=vite&logoColor=white)
+![Express](https://img.shields.io/badge/Express-5-000000?logo=express&logoColor=white)
+![Prisma](https://img.shields.io/badge/Prisma-7-2D3748?logo=prisma&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
+![Redis](https://img.shields.io/badge/Redis-7-DC382D?logo=redis&logoColor=white)
+
 A modular Enterprise Resource Planning (ERP) suite for running core business
 operations from a single web application. It brings financial accounting and
 inventory management together on one consistent, auditable ledger, protected by
 role-based access control and per-company data isolation.
+
+## Setup
+
+### Prerequisites
+
+- Node.js 20+ (npm 10+)
+- Docker with WSL2 backend (on Windows hosts, npm commands run from a WSL shell)
+
+### Install & run
+
+```bash
+cp .env.example .env            # repo root — database, redis, API config
+npm install                     # from WSL on Windows hosts (see note below)
+npm run infra:up                # Postgres (:15432) + Redis (:16379) containers
+npm run db:generate -w apps/api # Prisma client
+npm run db:migrate  -w apps/api # schema migrations
+npm run db:seed     -w apps/api # demo company, users, chart of accounts, stock
+npm run dev                     # API on :4000 + web on :5173 (concurrently)
+```
+
+> **Windows note:** install and run commands must be executed from WSL
+> (`wsl -e bash -lc "cd /mnt/d/<repo> && npm run dev"`) — the Linux
+> esbuild/rollup binaries are selected at install time and a Windows install
+> breaks them. The browser runs normally on Windows at `http://localhost:5173`.
+
+Seeded logins (password `Passw0rd!` for all):
+
+| User | Role |
+| --- | --- |
+| `admin@acme.test` | ADMIN — full access |
+| `accountant@acme.test` | ACCOUNTANT — accounting, no users/inventory writes |
+| `store@acme.test` | STOREKEEPER — inventory only |
+
+Optional extras:
+
+```bash
+npm run db:seed:demo -w apps/api  # a month of journal activity (for screenshots)
+npm run test                      # unit/integration tests (all workspaces)
+npm run e2e                       # golden-path smoke on a FRESH db (resets it)
+```
+
+### Production
+
+```bash
+npm run build   # static web build → apps/web/dist
+npm start       # API on :4000
+```
+
+## Screenshots
+
+A quick tour of the app (seeded demo data).
+
+### Dashboard
+
+Live overview of the company: account, product and journal counts, total stock
+units, low-stock alerts, and the most recent journal entries.
+
+![Dashboard](docs/screenshots/dashboard.png)
+
+### Chart of Accounts
+
+The ledger's accounts (assets, liabilities, equity, revenue, expenses) organized
+as a parent/child hierarchy. Accounts can be created, edited, and deactivated.
+
+![Chart of Accounts](docs/screenshots/chart-of-accounts.png)
+
+### Journal Entries
+
+The double-entry ledger. Entries live in a draft → posted → voided lifecycle and
+can only be posted when Σ debits = Σ credits. Expand a row to inspect its lines.
+
+![Journal Entries](docs/screenshots/journal-entries.png)
+
+### Stock Levels
+
+Quantity on hand and reserved per product and warehouse, with reorder
+thresholds and low-stock highlighting. Receives and issues adjust stock and
+post their journal entries automatically.
+
+![Stock Levels](docs/screenshots/stock-levels.png)
+
+### Trial Balance
+
+Posted entries grouped by account for any date range. The net column sums to
+zero across all accounts — that is the double-entry guarantee. Exportable to
+CSV.
+
+![Trial Balance](docs/screenshots/trial-balance.png)
 
 ## Functionality
 

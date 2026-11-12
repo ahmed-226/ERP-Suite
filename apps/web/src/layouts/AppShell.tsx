@@ -11,13 +11,12 @@ import {
   SwapOutlined,
   UserOutlined,
 } from '@ant-design/icons';
-import { Avatar, Dropdown, Layout, Menu, Space, Tag, Typography } from 'antd';
+import { Avatar, Dropdown, Layout, Menu, Space, Typography } from 'antd';
 import type { MenuProps } from 'antd';
 import { useMemo } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/auth/AuthContext';
 import { usePermission } from '@/auth/usePermission';
-import { dataSourceKind } from '@/data/client';
 
 const { Header, Sider, Content } = Layout;
 
@@ -159,9 +158,6 @@ export function AppShell() {
         >
           <Typography.Text strong>{user?.companyName ?? 'ERP Suite'}</Typography.Text>
           <Space>
-            <Tag color={dataSourceKind === 'mock' ? 'gold' : 'green'}>
-              data: {dataSourceKind}
-            </Tag>
             <Dropdown
               menu={{
                 items: userMenu,
