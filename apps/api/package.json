@@ -12,7 +12,8 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:seed": "prisma db seed",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "e2e": "bash scripts/e2e.sh"
   },
   "devDependencies": {
     "@types/bcrypt": "^6.0.0",
