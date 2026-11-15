@@ -39,6 +39,7 @@ import {
   type UpdateWarehouseInput,
   type Warehouse,
   type WarehouseFilter,
+  REVERSAL_REFERENCE_TYPE,
   SYSTEM_ACCOUNT_CODES,
 } from '@erp/shared';
 import { DataError } from '../errors';
@@ -391,6 +392,7 @@ export class MockStore {
       referenceId: j.referenceId,
       status: j.status,
       postedAt: j.postedAt,
+      reversedByEntryId: null,
       createdBy: j.createdBy,
       createdByName: this.userName(j.createdBy),
       createdAt: j.createdAt,
@@ -478,6 +480,7 @@ export class MockStore {
       referenceId: input.referenceId,
       status: input.status,
       postedAt: input.status === 'POSTED' ? new Date().toISOString() : null,
+      reversedByEntryId: null,
       createdBy: this.currentUserId ?? seed.users[0].userId,
       createdByName: this.userName(this.currentUserId ?? seed.users[0].userId),
       createdAt: new Date().toISOString(),
@@ -578,7 +581,28 @@ export class MockStore {
     if (entry.status === 'VOIDED') {
       throw new DataError('ENTRY_ALREADY_VOID', 'Entry is already voided');
     }
-    entry.status = 'VOIDED';
+    if (entry.reversedByEntryId) {
+      throw new DataError('ENTRY_ALREADY_VOID', 'Entry has already been reversed');
+    }
+    if (entry.status === 'DRAFT') {
+      entry.status = 'VOIDED';
+      return entry;
+    }
+
+    // Posted entries are never rewritten: post a mirror entry dated today.
+    const reversal = this.createEntry({
+      entryDate: today(),
+      referenceType: REVERSAL_REFERENCE_TYPE,
+      referenceId: entry.entryId,
+      status: 'POSTED',
+      lines: entry.lines.map((line) => ({
+        accountId: line.accountId,
+        entryType: line.entryType === 'DEBIT' ? 'CREDIT' : 'DEBIT',
+        amount: line.amount,
+        description: line.description,
+      })),
+    });
+    entry.reversedByEntryId = reversal.entryId;
     return entry;
   }
 

@@ -61,8 +61,8 @@ export default function JournalsPage() {
 
   const voidEntry = useMutation({
     mutationFn: (entryId: string) => data.journals.void(entryId),
-    onSuccess: () => {
-      message.success('Entry voided');
+    onSuccess: (entry) => {
+      message.success(entry.status === 'VOIDED' ? 'Draft voided' : 'Reversal posted');
       invalidate();
     },
     onError: (error) => {
@@ -101,9 +101,12 @@ export default function JournalsPage() {
     {
       title: 'Status',
       dataIndex: 'status',
-      width: 100,
-      render: (value: JournalEntry['status']) => (
-        <Tag color={JOURNAL_STATUS_COLORS[value]}>{value}</Tag>
+      width: 170,
+      render: (value: JournalEntry['status'], entry) => (
+        <Space size={4}>
+          <Tag color={JOURNAL_STATUS_COLORS[value]}>{value}</Tag>
+          {entry.reversedByEntryId ? <Tag color="purple">REVERSED</Tag> : null}
+        </Space>
       ),
     },
     {
@@ -160,10 +163,18 @@ export default function JournalsPage() {
               </Button>
             </Popconfirm>
           ) : null}
-          {entry.status !== 'VOIDED' && can('journals:post') ? (
-            <Popconfirm title="Void this entry?" onConfirm={() => voidEntry.mutate(entry.entryId)}>
+          {entry.status !== 'VOIDED' && !entry.reversedByEntryId && can('journals:post') ? (
+            <Popconfirm
+              title={entry.status === 'POSTED' ? 'Reverse this entry?' : 'Void this draft?'}
+              description={
+                entry.status === 'POSTED'
+                  ? 'A mirror entry is posted today; the original stays in the ledger.'
+                  : undefined
+              }
+              onConfirm={() => voidEntry.mutate(entry.entryId)}
+            >
               <Button size="small" danger>
-                Void
+                {entry.status === 'POSTED' ? 'Reverse' : 'Void'}
               </Button>
             </Popconfirm>
           ) : null}

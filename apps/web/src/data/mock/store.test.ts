@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { seed } from '@erp/shared';
+import { REVERSAL_REFERENCE_TYPE, seed } from '@erp/shared';
 import { MockStore } from './store';
 
 const [cash, , , inventory, accountsPayable, , , cogs] = seed.accounts;
@@ -75,6 +75,53 @@ describe('MockStore journal invariants', () => {
     await expect(
       store.createJournal({ entryDate: '2026-02-01', lines: lines() }),
     ).rejects.toMatchObject({ code: 'ACCOUNT_INACTIVE' });
+  });
+
+  it('voids a draft in place', async () => {
+    const store = await newStore();
+    const draft = await store.createJournal({
+      entryDate: '2026-02-01',
+      lines: [
+        { accountId: cogs.accountId, entryType: 'DEBIT', amount: 10 },
+        { accountId: cash.accountId, entryType: 'CREDIT', amount: 10 },
+      ],
+    });
+
+    const voided = await store.voidJournal(draft.entryId);
+    expect(voided.status).toBe('VOIDED');
+    expect(voided.reversedByEntryId).toBeNull();
+  });
+
+  it('reverses a posted entry instead of erasing it', async () => {
+    const store = await newStore();
+    const entry = await store.createJournal({
+      entryDate: '2026-02-01',
+      lines: [
+        { accountId: cogs.accountId, entryType: 'DEBIT', amount: 100 },
+        { accountId: cash.accountId, entryType: 'CREDIT', amount: 100 },
+      ],
+    });
+    await store.postJournal(entry.entryId);
+    // Reversals are dated today, so the original period must not move.
+    const range = { from: '2026-02-01', to: '2026-02-01' };
+    const before = await store.trialBalance(range);
+
+    const voided = await store.voidJournal(entry.entryId);
+    expect(voided.status).toBe('POSTED');
+    expect(voided.reversedByEntryId).toBeTruthy();
+
+    const reversal = await store.getJournal(voided.reversedByEntryId as string);
+    expect(reversal.status).toBe('POSTED');
+    expect(reversal.referenceType).toBe(REVERSAL_REFERENCE_TYPE);
+    expect(reversal.referenceId).toBe(entry.entryId);
+    expect(reversal.lines.map((line) => line.entryType)).toEqual(['CREDIT', 'DEBIT']);
+
+    // The pair nets to zero, so balances are unchanged and history survives.
+    expect(await store.trialBalance(range)).toEqual(before);
+
+    await expect(store.voidJournal(entry.entryId)).rejects.toMatchObject({
+      code: 'ENTRY_ALREADY_VOID',
+    });
   });
 });
 

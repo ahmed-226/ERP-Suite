@@ -62,14 +62,15 @@ stateDiagram-v2
     [*] --> DRAFT : create (save draft)
     DRAFT --> DRAFT : edit date / reference / lines
     DRAFT --> POSTED : post — requires Σ debits = Σ credits
-    DRAFT --> VOIDED : void
-    POSTED --> VOIDED : void
-    POSTED --> POSTED : immutable (edit rejected: ENTRY_NOT_EDITABLE)
+    DRAFT --> VOIDED : void draft
+    POSTED --> POSTED : immutable; void posts a mirror reversal
     VOIDED --> [*]
 ```
 
 - Only drafts can be edited (`ENTRY_NOT_EDITABLE`) and only drafts can be posted (`ENTRY_NOT_POSTABLE`).
-- `VOIDED` is terminal — voiding again is rejected (`ENTRY_ALREADY_VOID`).
+- Voiding a `DRAFT` flips it to `VOIDED`. Voiding a `POSTED` entry leaves it `POSTED` and posts a linked `REVERSAL` entry (`referenceType: 'REVERSAL'`, `referenceId` → original, mirrored debit/credit lines, dated today), so prior-period reports stay reproducible; the pair nets to zero.
+- `reversedByEntryId` on the original points at its reversal; the list shows a `REVERSED` tag.
+- `VOIDED` is terminal and a second void — or voiding an already-reversed entry — is rejected (`ENTRY_ALREADY_VOID`).
 
 ## 5. Creating and posting a journal entry
 

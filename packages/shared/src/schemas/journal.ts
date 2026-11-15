@@ -41,6 +41,8 @@ export interface JournalEntry {
   referenceId: string | null;
   status: JournalStatus;
   postedAt: string | null;
+  /** Set when a POSTED entry has been reversed; points at the reversing entry. */
+  reversedByEntryId: string | null;
   createdBy: string;
   createdByName: string;
   createdAt: string;

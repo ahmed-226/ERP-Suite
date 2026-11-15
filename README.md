@@ -82,8 +82,9 @@ as a parent/child hierarchy. Accounts can be created, edited, and deactivated.
 
 ### Journal Entries
 
-The double-entry ledger. Entries live in a draft → posted → voided lifecycle and
-can only be posted when Σ debits = Σ credits. Expand a row to inspect its lines.
+The double-entry ledger. Entries are posted only when Σ debits = Σ credits;
+voiding a posted entry adds a mirror reversal instead of erasing history. Expand
+a row to inspect its lines.
 
 ![Journal Entries](docs/screenshots/journal-entries.png)
 
@@ -108,7 +109,7 @@ CSV.
 ### Financial Accounting & General Ledger
 - Strict double-entry bookkeeping — every entry must balance (Σ debits = Σ credits) before it can be posted.
 - Chart of accounts with a parent/child hierarchy.
-- Journal entries with a draft → posted → voided lifecycle.
+- Journal entries with a draft → posted lifecycle; posted entries are reversed, never rewritten.
 - Trial balance reporting over any date range.
 
 ### Inventory & Warehouse Management
@@ -158,7 +159,7 @@ envelope: `{ "error": { "code": "...", "message": "...", "details": ... } }`.
 | GET | `/journals/:id` | Get an entry with its lines. |
 | PATCH | `/journals/:id` | Edit a draft entry. |
 | POST | `/journals/:id/post` | Post a draft entry (must balance). |
-| POST | `/journals/:id/void` | Void an entry. |
+| POST | `/journals/:id/void` | Void a draft, or post a mirror reversal for a posted entry. |
 | GET | `/reports/trial-balance` | Trial balance for a date range. |
 
 ### Products

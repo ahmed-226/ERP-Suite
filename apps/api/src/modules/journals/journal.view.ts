@@ -8,7 +8,7 @@ type FullEntry = Prisma.JournalEntryGetPayload<{
   };
 }>;
 
-export function serializeEntry(entry: FullEntry): JournalEntry {
+export function serializeEntry(entry: FullEntry, reversedByEntryId: string | null = null): JournalEntry {
   const lines: JournalEntryLine[] = entry.lines.map((line) => ({
     lineId: line.lineId,
     entryId: line.entryId,
@@ -34,6 +34,7 @@ export function serializeEntry(entry: FullEntry): JournalEntry {
     referenceId: entry.referenceId,
     status: entry.status,
     postedAt: entry.postedAt?.toISOString() ?? null,
+    reversedByEntryId,
     createdBy: entry.createdBy,
     createdByName: entry.createdByUser.fullName,
     createdAt: entry.createdAt.toISOString(),

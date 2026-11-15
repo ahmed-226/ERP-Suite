@@ -57,10 +57,8 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  // Leave the dev dataset clean: void anything the tests posted.
-  if (trialEntryId) {
-    await request(app).post(`/api/v1/journals/${trialEntryId}/void`).set(auth(admin));
-  }
+  // Posted test entries (and their reversals) stay in the ledger; balance
+  // assertions compare before/after so repeated runs remain valid.
   await prisma.chartOfAccount.deleteMany({ where: { accountId: foreign.accountId } });
   await prisma.company.deleteMany({ where: { companyId: foreign.companyId } });
   await prisma.$disconnect();
@@ -106,11 +104,15 @@ describe('journals lifecycle', () => {
       .set(auth(admin));
     expect(res.status).toBe(422);
     expect(res.body.error.code).toBe('JOURNAL_UNBALANCED');
-    // clean up the bad draft
-    await request(app).post(`/api/v1/journals/${created.body.entryId}/void`).set(auth(admin));
+    // A draft is voided in place (nothing was ever posted).
+    const voided = await request(app)
+      .post(`/api/v1/journals/${created.body.entryId}/void`)
+      .set(auth(admin));
+    expect(voided.body.status).toBe('VOIDED');
+    expect(voided.body.reversedByEntryId).toBeNull();
   });
 
-  it('rejects editing a POSTED entry but allows voiding it', async () => {
+  it('keeps a POSTED entry and posts a mirror reversal when voided', async () => {
     const posted = await request(app).post(`/api/v1/journals/${entryId}/post`).set(auth(admin));
     expect(posted.status).toBe(200);
     expect(posted.body.status).toBe('POSTED');
@@ -123,12 +125,43 @@ describe('journals lifecycle', () => {
     expect(edit.status).toBe(409);
     expect(edit.body.error.code).toBe('ENTRY_IMMUTABLE');
 
+    // History must not move: capture the original period before reversing.
+    const march = () =>
+      request(app)
+        .get('/api/v1/reports/trial-balance')
+        .query({ from: '2026-03-01', to: '2026-03-01' })
+        .set(auth(admin));
+    const marchBefore = await march();
+
     const voided = await request(app).post(`/api/v1/journals/${entryId}/void`).set(auth(admin));
     expect(voided.status).toBe(200);
-    expect(voided.body.status).toBe('VOIDED');
+    expect(voided.body.status).toBe('POSTED');
+    expect(voided.body.reversedByEntryId).toBeTruthy();
+
+    const marchAfter = await march();
+    expect(marchAfter.body).toEqual(marchBefore.body);
+
+    const reversal = await request(app)
+      .get(`/api/v1/journals/${voided.body.reversedByEntryId}`)
+      .set(auth(admin));
+    expect(reversal.status).toBe(200);
+    expect(reversal.body.status).toBe('POSTED');
+    expect(reversal.body.referenceType).toBe('REVERSAL');
+    expect(reversal.body.referenceId).toBe(entryId);
+    expect(reversal.body.lines).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ accountId: SYSTEM.inventoryId, entryType: 'CREDIT', amount: 225 }),
+        expect.objectContaining({ accountId: SYSTEM.apId, entryType: 'DEBIT', amount: 225 }),
+      ]),
+    );
+
+    const list = await request(app).get('/api/v1/journals').set(auth(admin));
+    const original = list.body.find((e: { entryId: string }) => e.entryId === entryId);
+    expect(original.reversedByEntryId).toBe(voided.body.reversedByEntryId);
 
     const again = await request(app).post(`/api/v1/journals/${entryId}/void`).set(auth(admin));
     expect(again.status).toBe(409);
+    expect(again.body.error.code).toBe('ENTRY_ALREADY_VOID');
   });
 
   it('rejects journal lines for unknown or other-company accounts', async () => {

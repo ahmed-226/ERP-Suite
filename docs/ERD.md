@@ -98,8 +98,8 @@ erDiagram
         string entryNumber UK "JE-0001 style counter"
         date entryDate
         string status "DRAFT | POSTED | VOIDED"
-        string referenceType "MANUAL | INVENTORY_RECEIPT | SALES_ISSUE"
-        string referenceId FK "movement id when auto-posted"
+        string referenceType "MANUAL | INVENTORY_RECEIPT | SALES_ISSUE | REVERSAL"
+        string referenceId FK "movement id, or reversed entry id for REVERSAL"
         string createdBy FK
         string postedAt
     }
@@ -125,7 +125,7 @@ erDiagram
 | `WAREHOUSE` | `warehouses` state | Stock-keeping location. | Unique code; cannot be deleted while holding stock or having movement history (`WAREHOUSE_IN_USE`). |
 | `INVENTORY_STOCK` | `stock` rows | Per-(product, warehouse) quantity bucket. Created lazily on first movement. | `quantityOnHand` can never go negative (DB CHECK mirrored in code). |
 | `INVENTORY_TRANSACTION` | `movements` list | Append-only movement ledger. Signed quantity: positive = in, negative = out. | Rows are never updated or deleted — new facts are new rows. |
-| `JOURNAL_ENTRY` | `journals` list | Double-entry document with a draft → posted → voided lifecycle. | ≥ 2 lines with positive amounts; `POSTED` requires Σ debits = Σ credits; posted entries are immutable. |
+| `JOURNAL_ENTRY` | `journals` list | Double-entry document with a draft → posted lifecycle; posted entries are reversed, never rewritten. | ≥ 2 lines with positive amounts; `POSTED` requires Σ debits = Σ credits; posted entries are immutable; voiding one posts a linked `REVERSAL` entry. |
 | `JOURNAL_ENTRY_LINE` | entry lines | One debit or credit against an account. | Amount always positive; side is `DEBIT` or `CREDIT`. |
 
 ## Relationships

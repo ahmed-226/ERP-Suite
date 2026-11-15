@@ -10,6 +10,9 @@ export type AccountType = (typeof ACCOUNT_TYPES)[number];
 export const JOURNAL_STATUSES = ['DRAFT', 'POSTED', 'VOIDED'] as const;
 export type JournalStatus = (typeof JOURNAL_STATUSES)[number];
 
+/** `referenceType` of the mirror entry posted when a POSTED entry is reversed. */
+export const REVERSAL_REFERENCE_TYPE = 'REVERSAL';
+
 export const ENTRY_TYPES = ['DEBIT', 'CREDIT'] as const;
 export type EntryType = (typeof ENTRY_TYPES)[number];
 

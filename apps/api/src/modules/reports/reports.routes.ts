@@ -92,7 +92,7 @@ reportRouter.get('/dashboard', requirePermission('reports:read'), async (req, re
     postedJournals,
     lowStockCount: stock.filter((s) => s.quantityOnHand <= s.product.reorderThreshold).length,
     totalStockUnits: stock.reduce((sum, s) => sum + s.quantityOnHand, 0),
-    recentJournals: recentJournalsRaw.map(serializeEntry),
+    recentJournals: recentJournalsRaw.map((entry) => serializeEntry(entry)),
     lowStock: lowStock.map((s) => ({
       stockId: s.stockId,
       productId: s.productId,

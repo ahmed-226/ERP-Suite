@@ -2,6 +2,7 @@ import { Router } from 'express';
 import {
   createJournalSchema,
   moneyToNumber,
+  REVERSAL_REFERENCE_TYPE,
   signedAmount,
   sumMoney,
   updateJournalSchema,
@@ -47,24 +48,43 @@ async function assertAccountsUsable(
   }
 }
 
+/** original entry id → its reversal entry id, for the given company. */
+async function reversalLinks(companyId: string, entryIds?: string[]): Promise<Map<string, string>> {
+  const reversals = await prisma.journalEntry.findMany({
+    where: {
+      companyId,
+      referenceType: REVERSAL_REFERENCE_TYPE,
+      referenceId: entryIds ? { in: entryIds } : { not: null },
+    },
+    select: { entryId: true, referenceId: true },
+  });
+  return new Map(reversals.map((reversal) => [reversal.referenceId as string, reversal.entryId]));
+}
+
 /** GET /journals?status=&referenceType=&from=&to=&search= */
 journalRouter.get('/', requirePermission('journals:read'), async (req, res) => {
   const filter = req.query as JournalFilter;
-  const entries = await prisma.journalEntry.findMany({
-    where: entryWhere(req.user!.companyId, filter),
-    orderBy: [{ entryDate: 'desc' }, { createdAt: 'desc' }],
-    include: entryInclude,
-  });
-  res.status(200).json(entries.map(serializeEntry));
+  const companyId = req.user!.companyId;
+  const [entries, links] = await Promise.all([
+    prisma.journalEntry.findMany({
+      where: entryWhere(companyId, filter),
+      orderBy: [{ entryDate: 'desc' }, { createdAt: 'desc' }],
+      include: entryInclude,
+    }),
+    reversalLinks(companyId),
+  ]);
+  res.status(200).json(entries.map((entry) => serializeEntry(entry, links.get(entry.entryId) ?? null)));
 });
 
 journalRouter.get('/:entryId', requirePermission('journals:read'), async (req, res) => {
+  const companyId = req.user!.companyId;
   const entry = await prisma.journalEntry.findFirst({
-    where: { entryId: req.params.entryId as string, companyId: req.user!.companyId },
+    where: { entryId: req.params.entryId as string, companyId },
     include: entryInclude,
   });
   if (!entry) throw notFound('Journal entry');
-  res.status(200).json(serializeEntry(entry));
+  const links = await reversalLinks(companyId, [entry.entryId]);
+  res.status(200).json(serializeEntry(entry, links.get(entry.entryId) ?? null));
 });
 
 /**
@@ -178,21 +198,75 @@ journalRouter.post('/:entryId/post', requirePermission('journals:post'), async (
   res.status(200).json(serializeEntry(entry));
 });
 
-/** POST /journals/:entryId/void — any non-voided entry can be voided. */
+/**
+ * POST /journals/:entryId/void — drafts are voided in place; a POSTED entry is
+ * never rewritten. Instead a mirror-image REVERSAL entry is posted today and
+ * both stay in the ledger, so prior-period balances remain reproducible.
+ */
 journalRouter.post('/:entryId/void', requirePermission('journals:post'), async (req, res) => {
   const entryId = req.params.entryId as string;
-  const existing = await prisma.journalEntry.findFirst({
-    where: { entryId, companyId: req.user!.companyId },
-    select: { status: true },
+  const companyId = req.user!.companyId;
+  const userId = req.user!.userId;
+
+  const entry = await prisma.$transaction(async (tx) => {
+    const existing = await tx.journalEntry.findFirst({
+      where: { entryId, companyId },
+      include: { lines: true },
+    });
+    if (!existing) throw notFound('Journal entry');
+    if (existing.status === 'VOIDED') {
+      throw new ApiError(409, 'ENTRY_ALREADY_VOID', 'Entry is already voided');
+    }
+
+    if (existing.status === 'DRAFT') {
+      const voided = await tx.journalEntry.update({
+        where: { entryId },
+        data: { status: 'VOIDED' },
+        include: entryInclude,
+      });
+      return serializeEntry(voided);
+    }
+
+    const alreadyReversed = await tx.journalEntry.findFirst({
+      where: { companyId, referenceType: REVERSAL_REFERENCE_TYPE, referenceId: entryId },
+      select: { entryId: true },
+    });
+    if (alreadyReversed) {
+      throw new ApiError(409, 'ENTRY_ALREADY_VOID', 'Entry has already been reversed');
+    }
+
+    // Create DRAFT first: the line-immutability trigger rejects new lines on a
+    // POSTED entry. Flipping it POSTED then runs the balance guard.
+    const reversal = await tx.journalEntry.create({
+      data: {
+        companyId,
+        entryNumber: await nextEntryNumber(tx, companyId),
+        entryDate: new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`),
+        referenceType: REVERSAL_REFERENCE_TYPE,
+        referenceId: entryId,
+        status: 'DRAFT',
+        createdBy: userId,
+        lines: {
+          create: existing.lines.map((line) => ({
+            accountId: line.accountId,
+            entryType: line.entryType === 'DEBIT' ? 'CREDIT' : 'DEBIT',
+            amount: line.amount,
+            description: line.description,
+          })),
+        },
+      },
+      select: { entryId: true },
+    });
+    await tx.journalEntry.update({
+      where: { entryId: reversal.entryId },
+      data: { status: 'POSTED', postedAt: new Date() },
+    });
+
+    const original = await tx.journalEntry.findUniqueOrThrow({
+      where: { entryId },
+      include: entryInclude,
+    });
+    return serializeEntry(original, reversal.entryId);
   });
-  if (!existing) throw notFound('Journal entry');
-  if (existing.status === 'VOIDED') {
-    throw new ApiError(409, 'ENTRY_ALREADY_VOID', 'Entry is already voided');
-  }
-  const entry = await prisma.journalEntry.update({
-    where: { entryId },
-    data: { status: 'VOIDED' },
-    include: entryInclude,
-  });
-  res.status(200).json(serializeEntry(entry));
+  res.status(200).json(entry);
 });
