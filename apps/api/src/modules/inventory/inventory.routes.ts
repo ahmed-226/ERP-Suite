@@ -2,6 +2,7 @@ import { Router } from 'express';
 import {
   adjustmentSchema,
   issueSchema,
+  money,
   receiptSchema,
   transferSchema,
   type MovementFilter,
@@ -145,7 +146,8 @@ inventoryRouter.post('/receipts', requirePermission('inventory:write'), async (r
       userId: req.user!.userId,
     });
     // Inventory → GL (WORKFLOWS.md §7): DR Inventory / CR Accounts Payable.
-    if (input.quantity * input.unitCost > 0) {
+    const amount = money(input.quantity).times(input.unitCost);
+    if (!amount.isZero()) {
       const accounts = await systemAccountIds(tx, companyId);
       await postInventoryJournal(tx, {
         companyId,
@@ -155,7 +157,7 @@ inventoryRouter.post('/receipts', requirePermission('inventory:write'), async (r
         referenceId: created.transactionId,
         debitAccountId: accounts.inventory,
         creditAccountId: accounts.accountsPayable,
-        amount: input.quantity * input.unitCost,
+        amount,
       });
     }
     return created;
@@ -188,8 +190,8 @@ inventoryRouter.post('/issues', requirePermission('inventory:write'), async (req
       userId: req.user!.userId,
     });
     // Inventory → GL (WORKFLOWS.md §8): DR COGS / CR Inventory.
-    const cost = input.unitCost ?? 0;
-    if (input.quantity * cost > 0) {
+    const amount = money(input.quantity).times(input.unitCost ?? 0);
+    if (!amount.isZero()) {
       const accounts = await systemAccountIds(tx, companyId);
       await postInventoryJournal(tx, {
         companyId,
@@ -199,7 +201,7 @@ inventoryRouter.post('/issues', requirePermission('inventory:write'), async (req
         referenceId: created.transactionId,
         debitAccountId: accounts.costOfGoodsSold,
         creditAccountId: accounts.inventory,
-        amount: input.quantity * cost,
+        amount,
       });
     }
     return created;

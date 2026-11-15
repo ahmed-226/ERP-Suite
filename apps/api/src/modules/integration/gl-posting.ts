@@ -1,4 +1,4 @@
-import { SYSTEM_ACCOUNT_CODES } from '@erp/shared';
+import { SYSTEM_ACCOUNT_CODES, type Decimal } from '@erp/shared';
 import type { PrismaTx } from '../inventory/inventory.view';
 import { nextEntryNumber } from '../journals/journal.view';
 
@@ -19,7 +19,7 @@ export async function postInventoryJournal(
     referenceId: string;
     debitAccountId: string;
     creditAccountId: string;
-    amount: number;
+    amount: Decimal;
   },
 ): Promise<string> {
   const entryNumber = await nextEntryNumber(tx, args.companyId);

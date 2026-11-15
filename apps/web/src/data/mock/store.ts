@@ -1,6 +1,10 @@
 import {
+  Decimal,
+  money,
+  moneyToNumber,
   seed,
   seedCreatedAt,
+  sumMoney,
   type Account,
   type AccountFilter,
   type AdjustmentInput,
@@ -71,7 +75,6 @@ interface NewJournalInput {
 
 const uid = (): string => globalThis.crypto.randomUUID();
 const today = (): string => new Date().toISOString().slice(0, 10);
-const round = (n: number): number => Math.round(n * 10000) / 10000;
 
 const SESSION_STORAGE_KEY = 'erp.mock.currentUserId';
 
@@ -400,13 +403,14 @@ export class MockStore {
     totalDebit: number;
     totalCredit: number;
   } {
-    let totalDebit = 0;
-    let totalCredit = 0;
-    for (const line of lines) {
-      if (line.entryType === 'DEBIT') totalDebit += line.amount;
-      else totalCredit += line.amount;
-    }
-    return { totalDebit: round(totalDebit), totalCredit: round(totalCredit) };
+    return {
+      totalDebit: moneyToNumber(
+        sumMoney(lines.filter((line) => line.entryType === 'DEBIT').map((line) => line.amount)),
+      ),
+      totalCredit: moneyToNumber(
+        sumMoney(lines.filter((line) => line.entryType === 'CREDIT').map((line) => line.amount)),
+      ),
+    };
   }
 
   private assertLinesWellFormed(lines: NewJournalInput['lines']): void {
@@ -419,11 +423,16 @@ export class MockStore {
   }
 
   private assertBalanced(lines: { entryType: EntryType; amount: number }[]): void {
-    const { totalDebit, totalCredit } = this.totals(lines);
-    if (totalDebit !== totalCredit) {
+    const totalDebit = sumMoney(
+      lines.filter((line) => line.entryType === 'DEBIT').map((line) => line.amount),
+    );
+    const totalCredit = sumMoney(
+      lines.filter((line) => line.entryType === 'CREDIT').map((line) => line.amount),
+    );
+    if (!totalDebit.equals(totalCredit)) {
       throw new DataError(
         'UNBALANCED_ENTRY',
-        `Entry is not balanced: debits ${totalDebit} vs credits ${totalCredit}`,
+        `Entry is not balanced: debits ${moneyToNumber(totalDebit)} vs credits ${moneyToNumber(totalCredit)}`,
       );
     }
   }
@@ -874,7 +883,7 @@ export class MockStore {
       movement.transactionId,
       this.accountByCode(SYSTEM_ACCOUNT_CODES.inventory).accountId,
       this.accountByCode(SYSTEM_ACCOUNT_CODES.accountsPayable).accountId,
-      round(input.quantity * input.unitCost),
+      moneyToNumber(money(input.quantity).times(input.unitCost)),
       `Goods receipt - ${product.sku}`,
     );
 
@@ -914,7 +923,7 @@ export class MockStore {
       movement.transactionId,
       this.accountByCode(SYSTEM_ACCOUNT_CODES.costOfGoodsSold).accountId,
       this.accountByCode(SYSTEM_ACCOUNT_CODES.inventory).accountId,
-      round(input.quantity * unitCost),
+      moneyToNumber(money(input.quantity).times(unitCost)),
       `Sales issue - ${product.sku}`,
     );
 
@@ -995,7 +1004,17 @@ export class MockStore {
 
   async trialBalance(filter: TrialBalanceFilter): Promise<TrialBalanceRow[]> {
     await this.wait();
-    const rows = new Map<string, TrialBalanceRow>();
+    const rows = new Map<
+      string,
+      {
+        accountId: string;
+        accountCode: string;
+        accountName: string;
+        accountType: TrialBalanceRow['accountType'];
+        debit: Decimal;
+        credit: Decimal;
+      }
+    >();
     for (const entry of this.journals) {
       if (entry.status !== 'POSTED') continue;
       if (entry.entryDate < filter.from || entry.entryDate > filter.to) continue;
@@ -1008,18 +1027,22 @@ export class MockStore {
             accountCode: account.accountCode,
             accountName: account.accountName,
             accountType: account.accountType,
-            debit: 0,
-            credit: 0,
-            net: 0,
+            debit: new Decimal(0),
+            credit: new Decimal(0),
           };
           rows.set(line.accountId, row);
         }
-        if (line.entryType === 'DEBIT') row.debit += line.amount;
-        else row.credit += line.amount;
+        if (line.entryType === 'DEBIT') row.debit = row.debit.plus(line.amount);
+        else row.credit = row.credit.plus(line.amount);
       }
     }
     return [...rows.values()]
-      .map((r) => ({ ...r, debit: round(r.debit), credit: round(r.credit), net: round(r.debit - r.credit) }))
+      .map((r) => ({
+        ...r,
+        debit: moneyToNumber(r.debit),
+        credit: moneyToNumber(r.credit),
+        net: moneyToNumber(r.debit.minus(r.credit)),
+      }))
       .sort((a, b) => a.accountCode.localeCompare(b.accountCode));
   }
 

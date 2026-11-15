@@ -1,5 +1,6 @@
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { Decimal } from '@erp/shared';
 import { createApp } from '../../app';
 import { prisma } from '../../db/db';
 import { redis, closeRedis } from '../../lib/redis';
@@ -143,6 +144,41 @@ describe('journals lifecycle', () => {
     const inventory = res.body.find((r: { accountCode: string }) => r.accountCode === '1200');
     expect(inventory.debit).toBe(beforeDebit + 50); // only the new POSTED entry counts
     expect(inventory.credit).toBe(beforeCredit);
+  });
+
+  it('posts and reports decimal amounts without float drift', async () => {
+    const tb = () =>
+      request(app)
+        .get('/api/v1/reports/trial-balance')
+        .query({ from: '2026-01-01', to: '2026-12-31' })
+        .set(auth(admin));
+
+    const before = await tb();
+    const beforeDebit =
+      before.body.find((r: { accountCode: string }) => r.accountCode === '1200')?.debit ?? 0;
+
+    const created = await request(app)
+      .post('/api/v1/journals')
+      .set(auth(admin))
+      .send({
+        entryDate: '2026-03-06',
+        lines: [
+          { accountId: SYSTEM.inventoryId, entryType: 'DEBIT', amount: 0.1 },
+          { accountId: SYSTEM.inventoryId, entryType: 'DEBIT', amount: 0.2 },
+          { accountId: SYSTEM.apId, entryType: 'CREDIT', amount: 0.3 },
+        ],
+      });
+    expect(created.status).toBe(201);
+
+    const posted = await request(app)
+      .post(`/api/v1/journals/${created.body.entryId}/post`)
+      .set(auth(admin));
+    expect(posted.status).toBe(200);
+
+    const after = await tb();
+    const afterDebit =
+      after.body.find((r: { accountCode: string }) => r.accountCode === '1200')?.debit ?? 0;
+    expect(new Decimal(afterDebit).minus(beforeDebit).toString()).toBe('0.3');
   });
 
   it('storekeeper cannot create journals', async () => {

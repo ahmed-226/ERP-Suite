@@ -1,6 +1,9 @@
 import { Router } from 'express';
 import {
   createJournalSchema,
+  moneyToNumber,
+  signedAmount,
+  sumMoney,
   updateJournalSchema,
   type JournalFilter,
 } from '@erp/shared';
@@ -122,12 +125,15 @@ journalRouter.post('/:entryId/post', requirePermission('journals:post'), async (
     if (existing.status !== 'DRAFT') {
       throw new ApiError(422, 'ENTRY_NOT_POSTABLE', 'Only draft entries can be posted');
     }
-    const balance = existing.lines.reduce(
-      (sum, l) => sum + (l.entryType === 'DEBIT' ? Number(l.amount) : -Number(l.amount)),
-      0,
+    const balance = sumMoney(
+      existing.lines.map((l) => signedAmount(l.entryType, l.amount)),
     );
-    if (balance !== 0) {
-      throw new ApiError(422, 'JOURNAL_UNBALANCED', `Debits minus credits must be 0 (is ${balance})`);
+    if (!balance.isZero()) {
+      throw new ApiError(
+        422,
+        'JOURNAL_UNBALANCED',
+        `Debits minus credits must be 0 (is ${moneyToNumber(balance)})`,
+      );
     }
     return tx.journalEntry.update({
       where: { entryId },

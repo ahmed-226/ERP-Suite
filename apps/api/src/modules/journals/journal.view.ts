@@ -1,4 +1,4 @@
-import type { JournalEntry, JournalEntryLine, JournalFilter } from '@erp/shared';
+import { moneyToNumber, sumMoney, type JournalEntry, type JournalEntryLine, type JournalFilter } from '@erp/shared';
 import type { Prisma } from '../../generated/prisma/client';
 
 type FullEntry = Prisma.JournalEntryGetPayload<{
@@ -19,12 +19,12 @@ export function serializeEntry(entry: FullEntry): JournalEntry {
     amount: Number(line.amount),
     description: line.description,
   }));
-  const totalDebit = lines
-    .filter((l) => l.entryType === 'DEBIT')
-    .reduce((sum, l) => sum + l.amount, 0);
-  const totalCredit = lines
-    .filter((l) => l.entryType === 'CREDIT')
-    .reduce((sum, l) => sum + l.amount, 0);
+  const totalDebit = moneyToNumber(
+    sumMoney(lines.filter((l) => l.entryType === 'DEBIT').map((l) => l.amount)),
+  );
+  const totalCredit = moneyToNumber(
+    sumMoney(lines.filter((l) => l.entryType === 'CREDIT').map((l) => l.amount)),
+  );
   return {
     entryId: entry.entryId,
     companyId: entry.companyId,

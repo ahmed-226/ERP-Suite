@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { Decimal, moneyToNumber } from '@erp/shared';
 import { prisma } from '../../db/db';
 import { requireAuth, requirePermission } from '../../middleware/auth';
 import { entryInclude, serializeEntry } from '../journals/journal.view';
@@ -23,7 +24,7 @@ reportRouter.get('/trial-balance', requirePermission('reports:read'), async (req
     select: { lines: { select: { accountId: true, entryType: true, amount: true, account: { select: { accountId: true, accountCode: true, accountName: true, accountType: true } } } } },
   });
 
-  const rows = new Map<string, { accountId: string; accountCode: string; accountName: string; accountType: string; debit: number; credit: number }>();
+  const rows = new Map<string, { accountId: string; accountCode: string; accountName: string; accountType: string; debit: Decimal; credit: Decimal }>();
   for (const line of entries.flatMap((e) => e.lines)) {
     let row = rows.get(line.accountId);
     if (!row) {
@@ -32,17 +33,22 @@ reportRouter.get('/trial-balance', requirePermission('reports:read'), async (req
         accountCode: line.account.accountCode,
         accountName: line.account.accountName,
         accountType: line.account.accountType,
-        debit: 0,
-        credit: 0,
+        debit: new Decimal(0),
+        credit: new Decimal(0),
       };
       rows.set(line.accountId, row);
     }
-    if (line.entryType === 'DEBIT') row.debit += Number(line.amount);
-    else row.credit += Number(line.amount);
+    if (line.entryType === 'DEBIT') row.debit = row.debit.plus(line.amount.toString());
+    else row.credit = row.credit.plus(line.amount.toString());
   }
   res.status(200).json(
     [...rows.values()]
-      .map((r) => ({ ...r, net: r.debit - r.credit }))
+      .map((r) => ({
+        ...r,
+        debit: moneyToNumber(r.debit),
+        credit: moneyToNumber(r.credit),
+        net: moneyToNumber(r.debit.minus(r.credit)),
+      }))
       .sort((a, b) => a.accountCode.localeCompare(b.accountCode)),
   );
 });
