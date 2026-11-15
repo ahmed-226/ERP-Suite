@@ -16,6 +16,37 @@ export const journalRouter = Router();
 
 journalRouter.use(requireAuth);
 
+type Tx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
+
+/**
+ * Every line must point at an active account owned by the caller's company.
+ * Unknown and other-company ids both return 404 so ids cannot be probed.
+ */
+async function assertAccountsUsable(
+  tx: Tx,
+  companyId: string,
+  lines: { accountId: string }[],
+): Promise<void> {
+  const ids = [...new Set(lines.map((line) => line.accountId))];
+  const accounts = await tx.chartOfAccount.findMany({
+    where: { accountId: { in: ids }, companyId },
+    select: { accountId: true, accountCode: true, isActive: true },
+  });
+  const found = new Set(accounts.map((account) => account.accountId));
+  const missing = ids.find((id) => !found.has(id));
+  if (missing) {
+    throw new ApiError(404, 'ACCOUNT_NOT_FOUND', `Account ${missing} not found`);
+  }
+  const inactive = accounts.filter((account) => !account.isActive);
+  if (inactive.length > 0) {
+    throw new ApiError(
+      422,
+      'ACCOUNT_INACTIVE',
+      `Account ${inactive.map((account) => account.accountCode).join(', ')} is inactive`,
+    );
+  }
+}
+
 /** GET /journals?status=&referenceType=&from=&to=&search= */
 journalRouter.get('/', requirePermission('journals:read'), async (req, res) => {
   const filter = req.query as JournalFilter;
@@ -46,6 +77,7 @@ journalRouter.post('/', requirePermission('journals:write'), async (req, res) =>
   const userId = req.user!.userId;
 
   const entry = await prisma.$transaction(async (tx) => {
+    await assertAccountsUsable(tx, companyId, input.lines);
     const nextNumber = await nextEntryNumber(tx, companyId);
     return tx.journalEntry.create({
       data: {
@@ -87,6 +119,7 @@ journalRouter.patch('/:entryId', requirePermission('journals:write'), async (req
       throw new ApiError(409, 'ENTRY_IMMUTABLE', `A ${existing.status} entry cannot be edited`);
     }
     if (input.lines) {
+      await assertAccountsUsable(tx, companyId, input.lines);
       await tx.journalEntryLine.deleteMany({ where: { entryId } });
       await tx.journalEntryLine.createMany({
         data: input.lines.map((line) => ({
@@ -125,6 +158,7 @@ journalRouter.post('/:entryId/post', requirePermission('journals:post'), async (
     if (existing.status !== 'DRAFT') {
       throw new ApiError(422, 'ENTRY_NOT_POSTABLE', 'Only draft entries can be posted');
     }
+    await assertAccountsUsable(tx, companyId, existing.lines);
     const balance = sumMoney(
       existing.lines.map((l) => signedAmount(l.entryType, l.amount)),
     );

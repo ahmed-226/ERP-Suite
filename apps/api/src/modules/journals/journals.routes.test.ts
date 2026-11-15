@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Decimal } from '@erp/shared';
@@ -10,6 +11,8 @@ const app = createApp();
 let admin = '';
 let accountant = '';
 let trialEntryId = '';
+let companyId = '';
+const foreign = { companyId: randomUUID(), accountId: randomUUID() };
 
 const SYSTEM = {
   inventoryId: '',
@@ -37,7 +40,20 @@ beforeAll(async () => {
     if (acc.accountCode === '2000') SYSTEM.apId = acc.accountId;
     if (acc.accountCode === '4000') SYSTEM.revenueId = acc.accountId;
     if (acc.accountCode === '5000') SYSTEM.cogsId = acc.accountId;
+    companyId = acc.companyId;
   }
+
+  // A second tenant's account proves line validation is company-scoped.
+  await prisma.company.create({ data: { companyId: foreign.companyId, name: 'Foreign Co.' } });
+  await prisma.chartOfAccount.create({
+    data: {
+      accountId: foreign.accountId,
+      companyId: foreign.companyId,
+      accountCode: '9000',
+      accountName: 'Foreign account',
+      accountType: 'ASSET',
+    },
+  });
 });
 
 afterAll(async () => {
@@ -45,6 +61,8 @@ afterAll(async () => {
   if (trialEntryId) {
     await request(app).post(`/api/v1/journals/${trialEntryId}/void`).set(auth(admin));
   }
+  await prisma.chartOfAccount.deleteMany({ where: { accountId: foreign.accountId } });
+  await prisma.company.deleteMany({ where: { companyId: foreign.companyId } });
   await prisma.$disconnect();
   closeRedis();
 });
@@ -111,6 +129,99 @@ describe('journals lifecycle', () => {
 
     const again = await request(app).post(`/api/v1/journals/${entryId}/void`).set(auth(admin));
     expect(again.status).toBe(409);
+  });
+
+  it('rejects journal lines for unknown or other-company accounts', async () => {
+    const send = (accountId: string) =>
+      request(app)
+        .post('/api/v1/journals')
+        .set(auth(admin))
+        .send({
+          entryDate: '2026-03-07',
+          lines: [
+            { accountId, entryType: 'DEBIT', amount: 10 },
+            { accountId: SYSTEM.apId, entryType: 'CREDIT', amount: 10 },
+          ],
+        });
+
+    const unknown = await send(randomUUID());
+    expect(unknown.status).toBe(404);
+    expect(unknown.body.error.code).toBe('ACCOUNT_NOT_FOUND');
+
+    const otherCompany = await send(foreign.accountId);
+    expect(otherCompany.status).toBe(404);
+    expect(otherCompany.body.error.code).toBe('ACCOUNT_NOT_FOUND');
+
+    const draft = await request(app)
+      .post('/api/v1/journals')
+      .set(auth(admin))
+      .send({ entryDate: '2026-03-07', lines: balancedLines() });
+    const patched = await request(app)
+      .patch(`/api/v1/journals/${draft.body.entryId}`)
+      .set(auth(admin))
+      .send({
+        lines: [
+          { accountId: foreign.accountId, entryType: 'DEBIT', amount: 10 },
+          { accountId: SYSTEM.apId, entryType: 'CREDIT', amount: 10 },
+        ],
+      });
+    expect(patched.status).toBe(404);
+    expect(patched.body.error.code).toBe('ACCOUNT_NOT_FOUND');
+
+    await prisma.journalEntry.deleteMany({ where: { entryId: draft.body.entryId } });
+  });
+
+  it('rejects inactive accounts when creating, editing or posting', async () => {
+    const accountId = randomUUID();
+    await prisma.chartOfAccount.create({
+      data: {
+        accountId,
+        companyId,
+        accountCode: `T-${randomUUID().slice(0, 8)}`,
+        accountName: 'Temporary account for inactive checks',
+        accountType: 'EXPENSE',
+      },
+    });
+
+    const lines = () => [
+      { accountId, entryType: 'DEBIT' as const, amount: 12 },
+      { accountId: SYSTEM.apId, entryType: 'CREDIT' as const, amount: 12 },
+    ];
+
+    let draftId = '';
+    try {
+      const draft = await request(app)
+        .post('/api/v1/journals')
+        .set(auth(admin))
+        .send({ entryDate: '2026-03-08', lines: lines() });
+      expect(draft.status).toBe(201);
+      draftId = draft.body.entryId;
+
+      await prisma.chartOfAccount.update({ where: { accountId }, data: { isActive: false } });
+
+      const created = await request(app)
+        .post('/api/v1/journals')
+        .set(auth(admin))
+        .send({ entryDate: '2026-03-08', lines: lines() });
+      expect(created.status).toBe(422);
+      expect(created.body.error.code).toBe('ACCOUNT_INACTIVE');
+
+      const patched = await request(app)
+        .patch(`/api/v1/journals/${draftId}`)
+        .set(auth(admin))
+        .send({ lines: lines() });
+      expect(patched.status).toBe(422);
+      expect(patched.body.error.code).toBe('ACCOUNT_INACTIVE');
+
+      const posted = await request(app)
+        .post(`/api/v1/journals/${draftId}/post`)
+        .set(auth(admin));
+      expect(posted.status).toBe(422);
+      expect(posted.body.error.code).toBe('ACCOUNT_INACTIVE');
+    } finally {
+      if (draftId) await prisma.journalEntry.deleteMany({ where: { entryId: draftId } });
+      await prisma.chartOfAccount.deleteMany({ where: { accountId } });
+    }
   });
 
   it('trial balance sums posted entries by account', async () => {

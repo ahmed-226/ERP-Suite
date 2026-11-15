@@ -58,6 +58,24 @@ describe('MockStore journal invariants', () => {
       store.updateJournal(postedEntry.entryId, { entryDate: '2026-03-01' }),
     ).rejects.toMatchObject({ code: 'ENTRY_NOT_EDITABLE' });
   });
+
+  it('refuses lines on an inactive account when creating or posting', async () => {
+    const store = await newStore();
+    const lines = () => [
+      { accountId: cogs.accountId, entryType: 'DEBIT' as const, amount: 10 },
+      { accountId: cash.accountId, entryType: 'CREDIT' as const, amount: 10 },
+    ];
+
+    const draft = await store.createJournal({ entryDate: '2026-02-01', lines: lines() });
+    await store.updateAccount(cogs.accountId, { isActive: false });
+
+    await expect(store.postJournal(draft.entryId)).rejects.toMatchObject({
+      code: 'ACCOUNT_INACTIVE',
+    });
+    await expect(
+      store.createJournal({ entryDate: '2026-02-01', lines: lines() }),
+    ).rejects.toMatchObject({ code: 'ACCOUNT_INACTIVE' });
+  });
 });
 
 describe('MockStore inventory invariants', () => {

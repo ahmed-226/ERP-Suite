@@ -422,6 +422,12 @@ export class MockStore {
     }
   }
 
+  private assertAccountActive(account: Account): void {
+    if (!account.isActive) {
+      throw new DataError('ACCOUNT_INACTIVE', `Account ${account.accountCode} is inactive`);
+    }
+  }
+
   private assertBalanced(lines: { entryType: EntryType; amount: number }[]): void {
     const totalDebit = sumMoney(
       lines.filter((line) => line.entryType === 'DEBIT').map((line) => line.amount),
@@ -440,6 +446,7 @@ export class MockStore {
   private buildLines(entryId: string, input: NewJournalInput['lines']): JournalEntryLine[] {
     return input.map((l) => {
       const account = this.accountById(l.accountId);
+      this.assertAccountActive(account);
       return {
         lineId: uid(),
         entryId,
@@ -557,6 +564,7 @@ export class MockStore {
     if (entry.status !== 'DRAFT') {
       throw new DataError('ENTRY_NOT_POSTABLE', 'Only draft entries can be posted');
     }
+    for (const line of entry.lines) this.assertAccountActive(this.accountById(line.accountId));
     this.assertBalanced(entry.lines);
     entry.status = 'POSTED';
     entry.postedAt = new Date().toISOString();
