@@ -96,13 +96,18 @@ flowchart TD
 ```mermaid
 flowchart TD
     A["Accounts page (tree table)"] --> B["Create / edit in drawer"]
-    B --> C{"Code unique?<br/>Parent exists?"}
+    B --> C{"Code unique?<br/>Parent exists and<br/>is not self/descendant?"}
     C -- "no" --> D["Reject: DUPLICATE_CODE<br/>or INVALID_PARENT"]
-    C -- "yes" --> E["Saved — tree re-renders"]
+    C -- "yes" --> T{"Type changed on an<br/>account with journal lines?"}
+    T -- "yes" --> U["Reject: ACCOUNT_TYPE_IN_USE"]
+    T -- "no" --> E["Saved — tree re-renders"]
     F["Delete account"] --> G{"Has children<br/>or journal lines?"}
     G -- "yes" --> H["Reject: ACCOUNT_IN_USE"]
     G -- "no" --> I["Removed"]
 ```
+
+- A parent assignment that would form a cycle (including self-parenting) is rejected (`INVALID_PARENT`).
+- Once an account has journal lines its type is fixed (`ACCOUNT_TYPE_IN_USE`); retire it by deactivating it instead of deleting.
 
 ## 7. Goods receipt (Inventory → General Ledger integration)
 

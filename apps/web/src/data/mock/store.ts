@@ -341,14 +341,33 @@ export class MockStore {
         throw new DataError('DUPLICATE_CODE', `Account code ${input.accountCode} already exists`);
       }
     }
-    if (input.parentAccountId === accountId) {
-      throw new DataError('INVALID_PARENT', 'An account cannot be its own parent');
+    if (input.parentAccountId) {
+      this.accountById(input.parentAccountId);
+      let cursor: string | null = input.parentAccountId;
+      while (cursor) {
+        if (cursor === accountId) {
+          throw new DataError('INVALID_PARENT', 'Parent assignment would create a cycle', 422);
+        }
+        cursor = this.accounts.find((a) => a.accountId === cursor)?.parentAccountId ?? null;
+      }
+    }
+    if (
+      input.accountType &&
+      input.accountType !== account.accountType &&
+      this.journals.some((j) => j.lines.some((l) => l.accountId === accountId))
+    ) {
+      throw new DataError(
+        'ACCOUNT_TYPE_IN_USE',
+        'Cannot change the type of an account that has journal lines',
+        409,
+      );
     }
     Object.assign(account, {
       accountCode: input.accountCode ?? account.accountCode,
       accountName: input.accountName ?? account.accountName,
       accountType: input.accountType ?? account.accountType,
-      parentAccountId: input.parentAccountId ?? account.parentAccountId,
+      parentAccountId:
+        input.parentAccountId !== undefined ? input.parentAccountId : account.parentAccountId,
       isActive: input.isActive ?? account.isActive,
     });
     return account;

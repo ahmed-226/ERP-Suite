@@ -73,11 +73,22 @@ accountRouter.post('/', requirePermission('accounts:write'), async (req, res) =>
 accountRouter.patch('/:accountId', requirePermission('accounts:write'), async (req, res) => {
   const input = updateAccountSchema.parse(req.body);
   const accountId = req.params.accountId as string;
-  await assertAccountInCompany(req.user!.companyId, accountId);
+  const account = await assertAccountInCompany(req.user!.companyId, accountId);
   if (input.parentAccountId) {
     await assertAccountInCompany(req.user!.companyId, input.parentAccountId);
+    await assertNoCycle(req.user!.companyId, accountId, input.parentAccountId);
   }
-  const account = await prisma.chartOfAccount.update({
+  if (input.accountType !== undefined && input.accountType !== account.accountType) {
+    const lines = await prisma.journalEntryLine.count({ where: { accountId } });
+    if (lines > 0) {
+      throw new ApiError(
+        409,
+        'ACCOUNT_TYPE_IN_USE',
+        'Cannot change the type of an account that has journal lines',
+      );
+    }
+  }
+  const updated = await prisma.chartOfAccount.update({
     where: { accountId },
     data: {
       ...(input.accountCode !== undefined ? { accountCode: input.accountCode } : {}),
@@ -87,7 +98,7 @@ accountRouter.patch('/:accountId', requirePermission('accounts:write'), async (r
       ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
     },
   });
-  res.status(200).json(serialize(account));
+  res.status(200).json(serialize(updated));
 });
 
 accountRouter.delete('/:accountId', requirePermission('accounts:write'), async (req, res) => {
@@ -106,10 +117,33 @@ accountRouter.delete('/:accountId', requirePermission('accounts:write'), async (
   res.status(204).send();
 });
 
-async function assertAccountInCompany(companyId: string, accountId: string): Promise<void> {
-  const exists = await prisma.chartOfAccount.findFirst({
+async function assertAccountInCompany(companyId: string, accountId: string) {
+  const account = await prisma.chartOfAccount.findFirst({
     where: { accountId, companyId },
-    select: { accountId: true },
   });
-  if (!exists) throw notFound('Account');
+  if (!account) throw notFound('Account');
+  return account;
+}
+
+/**
+ * Walk the proposed parent's ancestor chain: if it reaches `accountId`, the
+ * assignment would detach the subtree into a cycle that the client tree cannot
+ * render. Self-parenting is the first iteration of the same walk.
+ */
+async function assertNoCycle(
+  companyId: string,
+  accountId: string,
+  parentAccountId: string,
+): Promise<void> {
+  let cursor: string | null = parentAccountId;
+  while (cursor) {
+    if (cursor === accountId) {
+      throw new ApiError(422, 'INVALID_PARENT', 'Parent assignment would create a cycle');
+    }
+    const node: { parentAccountId: string | null } | null = await prisma.chartOfAccount.findFirst({
+      where: { accountId: cursor, companyId },
+      select: { parentAccountId: true },
+    });
+    cursor = node?.parentAccountId ?? null;
+  }
 }

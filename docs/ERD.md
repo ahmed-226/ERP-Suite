@@ -120,7 +120,7 @@ erDiagram
 | `COMPANY` | `packages/shared/src/seed` | The tenant ("Acme Trading Co."). Single company in v1; every business row carries its id. | All data is scoped to it. |
 | `ROLE` | seed roles | Named permission bundle: `ADMIN`, `ACCOUNTANT`, `STOREKEEPER`, `VIEWER`. | Permissions are a flattened list per role (Stage B normalizes into `permissions` + `role_permissions` tables). |
 | `USER` | seed users | A sign-in identity with email, name and one assigned role. | Login requires exact email + password (`INVALID_CREDENTIALS` otherwise). |
-| `ACCOUNT` | `accounts` state | Chart-of-accounts node; self-referencing tree via `parentAccountId`. | Unique code (`DUPLICATE_CODE`); cannot be its own parent; cannot be deleted while it has children or journal lines (`ACCOUNT_IN_USE`). |
+| `ACCOUNT` | `accounts` state | Chart-of-accounts node; self-referencing tree via `parentAccountId`. | Unique code (`DUPLICATE_CODE`); parent assignment must not create a cycle (`INVALID_PARENT`); `accountType` is fixed once journal lines exist (`ACCOUNT_TYPE_IN_USE`); cannot be deleted while it has children or journal lines (`ACCOUNT_IN_USE`). |
 | `PRODUCT` | `products` state | Item catalog entry (SKU, unit of measure, reorder threshold). | Unique SKU (`DUPLICATE_SKU`); cannot be deleted with stock on hand or movement history (`PRODUCT_IN_USE`). |
 | `WAREHOUSE` | `warehouses` state | Stock-keeping location. | Unique code; cannot be deleted while holding stock or having movement history (`WAREHOUSE_IN_USE`). |
 | `INVENTORY_STOCK` | `stock` rows | Per-(product, warehouse) quantity bucket. Created lazily on first movement. | `quantityOnHand` can never go negative (DB CHECK mirrored in code). |

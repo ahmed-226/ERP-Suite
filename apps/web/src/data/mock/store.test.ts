@@ -125,6 +125,56 @@ describe('MockStore journal invariants', () => {
   });
 });
 
+describe('MockStore account guards', () => {
+  it('rejects a parent that would create a cycle', async () => {
+    const store = await newStore();
+    const parent = await store.createAccount({
+      accountCode: 'T-9001',
+      accountName: 'Cycle parent',
+      accountType: 'ASSET',
+    });
+    const child = await store.createAccount({
+      accountCode: 'T-9002',
+      accountName: 'Cycle child',
+      accountType: 'ASSET',
+      parentAccountId: parent.accountId,
+    });
+
+    await expect(
+      store.updateAccount(parent.accountId, { parentAccountId: child.accountId }),
+    ).rejects.toMatchObject({ code: 'INVALID_PARENT', status: 422 });
+    await expect(
+      store.updateAccount(parent.accountId, { parentAccountId: parent.accountId }),
+    ).rejects.toMatchObject({ code: 'INVALID_PARENT' });
+
+    const cleared = await store.updateAccount(parent.accountId, { parentAccountId: null });
+    expect(cleared.parentAccountId).toBeNull();
+  });
+
+  it('rejects retyping an account that has journal lines', async () => {
+    const store = await newStore();
+    const account = await store.createAccount({
+      accountCode: 'T-9003',
+      accountName: 'Used account',
+      accountType: 'ASSET',
+    });
+    await store.createJournal({
+      entryDate: '2026-02-01',
+      lines: [
+        { accountId: account.accountId, entryType: 'DEBIT', amount: 10 },
+        { accountId: account.accountId, entryType: 'CREDIT', amount: 10 },
+      ],
+    });
+
+    await expect(
+      store.updateAccount(account.accountId, { accountType: 'EXPENSE' }),
+    ).rejects.toMatchObject({ code: 'ACCOUNT_TYPE_IN_USE', status: 409 });
+
+    const retired = await store.updateAccount(account.accountId, { isActive: false });
+    expect(retired.isActive).toBe(false);
+  });
+});
+
 describe('MockStore inventory invariants', () => {
   it('blocks an issue larger than the stock on hand', async () => {
     const store = await newStore();
