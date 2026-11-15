@@ -960,14 +960,17 @@ export class MockStore {
       input.referenceId ?? null,
     );
 
-    this.inventoryEntry(
-      'INVENTORY_RECEIPT',
-      movement.transactionId,
-      this.accountByCode(SYSTEM_ACCOUNT_CODES.inventory).accountId,
-      this.accountByCode(SYSTEM_ACCOUNT_CODES.accountsPayable).accountId,
-      moneyToNumber(money(input.quantity).times(input.unitCost)),
-      `Goods receipt - ${product.sku}`,
-    );
+    const amount = moneyToNumber(money(input.quantity).times(input.unitCost));
+    if (amount !== 0) {
+      this.inventoryEntry(
+        'INVENTORY_RECEIPT',
+        movement.transactionId,
+        this.accountByCode(SYSTEM_ACCOUNT_CODES.inventory).accountId,
+        this.accountByCode(SYSTEM_ACCOUNT_CODES.accountsPayable).accountId,
+        amount,
+        `Goods receipt - ${product.sku}`,
+      );
+    }
 
     return this.enrichMovement(movement);
   }
@@ -1000,14 +1003,17 @@ export class MockStore {
       input.referenceId ?? null,
     );
 
-    this.inventoryEntry(
-      'SALES_ISSUE',
-      movement.transactionId,
-      this.accountByCode(SYSTEM_ACCOUNT_CODES.costOfGoodsSold).accountId,
-      this.accountByCode(SYSTEM_ACCOUNT_CODES.inventory).accountId,
-      moneyToNumber(money(input.quantity).times(unitCost)),
-      `Sales issue - ${product.sku}`,
-    );
+    const amount = moneyToNumber(money(input.quantity).times(unitCost));
+    if (amount !== 0) {
+      this.inventoryEntry(
+        'SALES_ISSUE',
+        movement.transactionId,
+        this.accountByCode(SYSTEM_ACCOUNT_CODES.costOfGoodsSold).accountId,
+        this.accountByCode(SYSTEM_ACCOUNT_CODES.inventory).accountId,
+        amount,
+        `Sales issue - ${product.sku}`,
+      );
+    }
 
     return this.enrichMovement(movement);
   }
@@ -1079,6 +1085,24 @@ export class MockStore {
       product.averageCost,
       null,
     );
+    // A write-off expenses the lost value; a gain brings it back. Zero-value
+    // adjustments post nothing, matching the API (WORKFLOWS.md §10).
+    const amount = moneyToNumber(money(Math.abs(input.quantityDelta)).times(product.averageCost));
+    if (amount !== 0) {
+      const writeOff = input.quantityDelta < 0;
+      this.inventoryEntry(
+        'ADJUSTMENT',
+        movement.transactionId,
+        this.accountByCode(
+          writeOff ? SYSTEM_ACCOUNT_CODES.operatingExpenses : SYSTEM_ACCOUNT_CODES.inventory,
+        ).accountId,
+        this.accountByCode(
+          writeOff ? SYSTEM_ACCOUNT_CODES.inventory : SYSTEM_ACCOUNT_CODES.operatingExpenses,
+        ).accountId,
+        amount,
+        `Stock adjustment - ${product.sku}`,
+      );
+    }
     return this.enrichMovement(movement);
   }
 

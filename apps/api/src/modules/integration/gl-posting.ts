@@ -3,11 +3,12 @@ import type { PrismaTx } from '../inventory/inventory.view';
 import { nextEntryNumber } from '../journals/journal.view';
 
 /**
- * Cross-module integration (WORKFLOWS.md §7–8): an inventory receipt posts
+ * Cross-module integration (WORKFLOWS.md §7–8, §10): an inventory receipt posts
  * DR {inventory} / CR {accountsPayable}, a sales issue posts
- * DR {costOfGoodsSold} / CR {inventory}. The entry is created DRAFT (so the
- * immutability trigger lets lines in), then flipped POSTED — the balance
- * trigger guards the flip.
+ * DR {costOfGoodsSold} / CR {inventory}, and a stock adjustment posts against
+ * {operatingExpenses} in the direction of the gain or loss. The entry is created
+ * DRAFT (so the immutability trigger lets lines in), then flipped POSTED — the
+ * balance trigger guards the flip.
  */
 export async function postInventoryJournal(
   tx: PrismaTx,
@@ -15,7 +16,7 @@ export async function postInventoryJournal(
     companyId: string;
     userId: string;
     entryDate: Date;
-    referenceType: 'INVENTORY_RECEIPT' | 'SALES_ISSUE';
+    referenceType: 'INVENTORY_RECEIPT' | 'SALES_ISSUE' | 'ADJUSTMENT';
     referenceId: string;
     debitAccountId: string;
     creditAccountId: string;
@@ -23,6 +24,12 @@ export async function postInventoryJournal(
   },
 ): Promise<string> {
   const entryNumber = await nextEntryNumber(tx, args.companyId);
+  const description =
+    args.referenceType === 'INVENTORY_RECEIPT'
+      ? 'Goods receipt'
+      : args.referenceType === 'SALES_ISSUE'
+        ? 'Cost of goods sold'
+        : 'Stock adjustment';
   const entry = await tx.journalEntry.create({
     data: {
       companyId: args.companyId,
@@ -38,7 +45,7 @@ export async function postInventoryJournal(
             accountId: args.debitAccountId,
             entryType: 'DEBIT',
             amount: args.amount,
-            description: args.referenceType === 'INVENTORY_RECEIPT' ? 'Goods receipt' : 'Cost of goods sold',
+            description,
           },
           {
             accountId: args.creditAccountId,
@@ -60,7 +67,12 @@ export async function postInventoryJournal(
 export async function systemAccountIds(
   tx: PrismaTx,
   companyId: string,
-): Promise<{ inventory: string; accountsPayable: string; costOfGoodsSold: string }> {
+): Promise<{
+  inventory: string;
+  accountsPayable: string;
+  costOfGoodsSold: string;
+  operatingExpenses: string;
+}> {
   const accounts = await tx.chartOfAccount.findMany({
     where: {
       companyId,
@@ -69,13 +81,14 @@ export async function systemAccountIds(
           SYSTEM_ACCOUNT_CODES.inventory,
           SYSTEM_ACCOUNT_CODES.accountsPayable,
           SYSTEM_ACCOUNT_CODES.costOfGoodsSold,
+          SYSTEM_ACCOUNT_CODES.operatingExpenses,
         ],
       },
     },
     select: { accountCode: true, accountId: true },
   });
   const byCode = new Map(accounts.map((a) => [a.accountCode, a.accountId]));
-  const missing = ['1200', '2000', '5000'].filter((code) => !byCode.has(code));
+  const missing = ['1200', '2000', '5000', '5100'].filter((code) => !byCode.has(code));
   if (missing.length > 0) {
     throw new Error(`System account(s) missing: ${missing.join(', ')}`);
   }
@@ -83,5 +96,6 @@ export async function systemAccountIds(
     inventory: byCode.get(SYSTEM_ACCOUNT_CODES.inventory)!,
     accountsPayable: byCode.get(SYSTEM_ACCOUNT_CODES.accountsPayable)!,
     costOfGoodsSold: byCode.get(SYSTEM_ACCOUNT_CODES.costOfGoodsSold)!,
+    operatingExpenses: byCode.get(SYSTEM_ACCOUNT_CODES.operatingExpenses)!,
   };
 }

@@ -164,8 +164,25 @@ flowchart TD
     B -- "no" --> C["Reject: INSUFFICIENT_STOCK"]
     B -- "yes" --> D["Apply delta to stock"]
     D --> E["Append ADJUSTMENT movement<br/>valued at averageCost"]
-    E --> F["No journal entry in v1"]
+    E --> F{"Value = |delta| × averageCost"}
+    F -- "zero" --> G["No journal entry<br/>(zero-value movement)"]
+    F -- "loss (delta < 0)" --> H["DR 5100 Operating Expenses /<br/>CR 1200 Inventory"]
+    F -- "gain (delta > 0)" --> I["DR 1200 Inventory /<br/>CR 5100 Operating Expenses"]
 ```
+
+Every stock-affecting operation either posts a balanced entry or is explicitly
+non-posting:
+
+| Operation | GL behaviour |
+| --- | --- |
+| Goods receipt | DR `1200` / CR `2000`; zero-cost receipts post nothing. |
+| Sales issue | DR `5000` / CR `1200` at valuation cost; zero-value issues post nothing. |
+| Warehouse transfer | No GL entry — both warehouses belong to the same inventory account. |
+| Stock adjustment | Gain/loss against `5100`; zero-value adjustments post nothing. |
+
+Because every value-changing movement posts, the `1200` Inventory balance
+reconciles to the valuation report total. The integration test asserts this on a
+fresh company/product; seeded data is posted the same way.
 
 ## 10a. Inventory valuation report
 

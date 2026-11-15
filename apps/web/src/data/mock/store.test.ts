@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { REVERSAL_REFERENCE_TYPE, seed } from '@erp/shared';
 import { MockStore } from './store';
 
-const [cash, , , inventory, accountsPayable, , , cogs] = seed.accounts;
+const [cash, , , inventory, accountsPayable, , , cogs, operatingExpenses] = seed.accounts;
 const mainWarehouse = seed.warehouses[0].warehouseId;
 const secondaryWarehouse = seed.warehouses[1].warehouseId;
 const [mouse, , monitor] = seed.products;
@@ -277,5 +277,127 @@ describe('MockStore inventory invariants', () => {
     });
     const summed = report.rows.reduce((sum, row) => sum + row.value, 0);
     expect(report.totalValue).toBeCloseTo(summed, 4);
+  });
+
+  it('posts adjustment write-offs and gains against operating expenses', async () => {
+    const store = await newStore();
+    const product = await store.createProduct({ sku: 'ADJ-TEST-1', name: 'Adjustment product' });
+    await store.receipt({
+      productId: product.productId,
+      warehouseId: mainWarehouse,
+      quantity: 10,
+      unitCost: 10,
+    });
+
+    const writeOff = await store.adjust({
+      productId: product.productId,
+      warehouseId: mainWarehouse,
+      quantityDelta: -2,
+      reason: 'Damaged',
+    });
+    const loss = (await store.listJournals({})).find(
+      (entry) => entry.referenceId === writeOff.transactionId,
+    );
+    expect(loss?.status).toBe('POSTED');
+    expect(loss?.lines.find((line) => line.entryType === 'DEBIT')?.accountId).toBe(
+      operatingExpenses.accountId,
+    );
+    expect(loss?.lines.find((line) => line.entryType === 'CREDIT')?.accountId).toBe(
+      inventory.accountId,
+    );
+    expect(loss?.totalDebit).toBe(20);
+
+    const gain = await store.adjust({
+      productId: product.productId,
+      warehouseId: mainWarehouse,
+      quantityDelta: 2,
+      reason: 'Found stock',
+    });
+    const found = (await store.listJournals({})).find(
+      (entry) => entry.referenceId === gain.transactionId,
+    );
+    expect(found?.lines.find((line) => line.entryType === 'DEBIT')?.accountId).toBe(
+      inventory.accountId,
+    );
+    expect(found?.lines.find((line) => line.entryType === 'CREDIT')?.accountId).toBe(
+      operatingExpenses.accountId,
+    );
+  });
+
+  it('keeps inventory GL equal to the valuation report for fully posted activity', async () => {
+    const store = await newStore();
+    const inventoryNet = async (): Promise<number> => {
+      const row = (await store.trialBalance({ from: '2000-01-01', to: '2100-01-01' })).find(
+        (r) => r.accountId === inventory.accountId,
+      );
+      return row?.net ?? 0;
+    };
+    const before = await inventoryNet();
+
+    const product = await store.createProduct({ sku: 'RECON-TEST-1', name: 'Reconciliation product' });
+    await store.receipt({
+      productId: product.productId,
+      warehouseId: mainWarehouse,
+      quantity: 10,
+      unitCost: 10,
+    });
+    await store.issue({ productId: product.productId, warehouseId: mainWarehouse, quantity: 2 });
+    await store.adjust({
+      productId: product.productId,
+      warehouseId: mainWarehouse,
+      quantityDelta: -3,
+      reason: 'Shrinkage',
+    });
+    await store.adjust({
+      productId: product.productId,
+      warehouseId: mainWarehouse,
+      quantityDelta: 1,
+      reason: 'Count gain',
+    });
+    await store.transfer({
+      productId: product.productId,
+      fromWarehouseId: mainWarehouse,
+      toWarehouseId: secondaryWarehouse,
+      quantity: 2,
+    });
+
+    const row = (await store.inventoryValuation()).rows.find(
+      (r) => r.productId === product.productId,
+    );
+    expect(row).toMatchObject({ quantityOnHand: 6, averageCost: 10, value: 60 });
+    expect((await inventoryNet()) - before).toBeCloseTo(row!.value, 4);
+  });
+
+  it('posts nothing for zero-value movements', async () => {
+    const store = await newStore();
+    const product = await store.createProduct({ sku: 'ZERO-TEST-1', name: 'Zero value product' });
+
+    const receipt = await store.receipt({
+      productId: product.productId,
+      warehouseId: mainWarehouse,
+      quantity: 5,
+      unitCost: 0,
+    });
+    const issue = await store.issue({
+      productId: product.productId,
+      warehouseId: mainWarehouse,
+      quantity: 1,
+    });
+    const adjustment = await store.adjust({
+      productId: product.productId,
+      warehouseId: mainWarehouse,
+      quantityDelta: 2,
+      reason: 'Count gain',
+    });
+
+    const movements = new Set([
+      receipt.transactionId,
+      issue.transactionId,
+      adjustment.transactionId,
+    ]);
+    const entries = (await store.listJournals({})).filter(
+      (entry) => entry.referenceId !== null && movements.has(entry.referenceId),
+    );
+    expect(entries).toHaveLength(0);
   });
 });

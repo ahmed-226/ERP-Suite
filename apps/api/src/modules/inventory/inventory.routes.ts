@@ -297,22 +297,41 @@ inventoryRouter.post('/adjustments', requirePermission('inventory:write'), async
       where: { productId: input.productId },
       select: { averageCost: true },
     });
+    const unitCost = Number(product.averageCost);
     await applyStockDelta(tx, {
       companyId,
       productId: input.productId,
       warehouseId: input.warehouseId,
       quantityDelta: input.quantityDelta,
     });
-    return recordMovement(tx, {
+    const created = await recordMovement(tx, {
       companyId,
       productId: input.productId,
       warehouseId: input.warehouseId,
       movementType: 'ADJUSTMENT',
       quantity: input.quantityDelta,
-      unitCost: Number(product.averageCost),
+      unitCost,
       referenceId: null,
       userId: req.user!.userId,
     });
+    // Inventory → GL (WORKFLOWS.md §10): a write-off expenses the lost value,
+    // a gain brings it back. Zero-value adjustments post nothing (documented).
+    const amount = money(Math.abs(input.quantityDelta)).times(unitCost);
+    if (!amount.isZero()) {
+      const accounts = await systemAccountIds(tx, companyId);
+      const writeOff = input.quantityDelta < 0;
+      await postInventoryJournal(tx, {
+        companyId,
+        userId: req.user!.userId,
+        entryDate: new Date(),
+        referenceType: 'ADJUSTMENT',
+        referenceId: created.transactionId,
+        debitAccountId: writeOff ? accounts.operatingExpenses : accounts.inventory,
+        creditAccountId: writeOff ? accounts.inventory : accounts.operatingExpenses,
+        amount,
+      });
+    }
+    return created;
   });
   res.status(201).json(serializeMovement(movement));
 });

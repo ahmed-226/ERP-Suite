@@ -118,7 +118,8 @@ CSV.
 - An immutable movement ledger (goods receipts, sales issues, transfers, adjustments) for full auditability.
 - Company-wide weighted-average valuation; issues and adjustments are costed server-side, never from client input.
 - Low-stock highlighting against reorder thresholds.
-- Goods receipts and sales issues post a balanced journal entry automatically.
+- Goods receipts and sales issues post a balanced journal entry automatically; stock adjustments post a gain or loss against operating expenses.
+- Inventory valuation reconciles to the `1200` Inventory ledger balance (zero-value movements are log-only).
 
 ### Access Control
 - Role-based access control with permissions at the module and action level.

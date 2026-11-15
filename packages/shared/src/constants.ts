@@ -52,4 +52,5 @@ export const SYSTEM_ACCOUNT_CODES = {
   accountsPayable: '2000',
   salesRevenue: '4000',
   costOfGoodsSold: '5000',
+  operatingExpenses: '5100',
 } as const;

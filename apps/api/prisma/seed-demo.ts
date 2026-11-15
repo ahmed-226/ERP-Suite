@@ -67,6 +67,7 @@ const AR = '1100';
 const INVENTORY = '1200';
 const AP = '2000';
 const COGS = '5000';
+const OPERATING_EXPENSES = '5100';
 
 const SUBACCOUNTS: {
   accountId: string;
@@ -123,7 +124,7 @@ const OUTFLOWS: Mv[] = [
   MV(10, 10, 'SALES_ISSUE', 'DEMO-102', 'MAIN', -4, 220),
   MV(9, 11, 'SALES_ISSUE', 'DEMO-101', 'MAIN', -8, 85),
   MV(8, 9, 'SALES_ISSUE', 'DEMO-104', 'RET', -10, 12),
-  MV(7, 13, 'ADJUSTMENT', 'DEMO-107', 'MAIN', -2, 0),
+  MV(7, 13, 'ADJUSTMENT', 'DEMO-107', 'MAIN', -2, 55),
   MV(5, 9, 'ADJUSTMENT', 'DEMO-106', 'EAST', 5, 8),
   MV(4, 15, 'SALES_ISSUE', 'DEMO-109', 'EAST', -60, 4),
   MV(3, 10, 'SALES_ISSUE', 'DEMO-103', 'MAIN', -20, 35),
@@ -326,6 +327,20 @@ async function main(): Promise<void> {
           { accountId: accountId.get(INVENTORY)!, entryType: 'CREDIT', amount: Math.abs(m.qty) * m.cost, description: null },
         ],
       });
+    } else if (m.type === 'ADJUSTMENT') {
+      const amount = Math.abs(m.qty) * m.cost;
+      const writeOff = m.qty < 0;
+      await createEntry({
+        entryDate: at(m.day, m.hour),
+        posted: true,
+        referenceType: 'ADJUSTMENT',
+        referenceId: transactionId,
+        createdBy: STORE_ID,
+        lines: [
+          { accountId: accountId.get(writeOff ? OPERATING_EXPENSES : INVENTORY)!, entryType: 'DEBIT', amount, description: `Stock adjustment — ${m.sku}` },
+          { accountId: accountId.get(writeOff ? INVENTORY : OPERATING_EXPENSES)!, entryType: 'CREDIT', amount, description: writeOff ? null : 'Stock adjustment gain' },
+        ],
+      });
     }
   }
 
@@ -350,7 +365,7 @@ async function main(): Promise<void> {
     demoStockRows: stockByCombo.size,
     demoMovements: allMovements.length,
     demoJournals: await prisma.journalEntry.count({
-      where: { companyId: COMPANY_ID, OR: [{ referenceType: REFERENCE_TYPE }, { referenceType: { in: ['INVENTORY_RECEIPT', 'SALES_ISSUE'] } }] },
+      where: { companyId: COMPANY_ID, OR: [{ referenceType: REFERENCE_TYPE }, { referenceType: { in: ['INVENTORY_RECEIPT', 'SALES_ISSUE', 'ADJUSTMENT'] } }] },
     }),
   };
   console.log('demo seed complete', counts);

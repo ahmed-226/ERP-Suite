@@ -152,4 +152,9 @@ Inventory operations post journal entries against fixed system accounts
 | --- | --- | --- |
 | Goods receipt | `1200` Inventory | `2000` Accounts Payable |
 | Sales issue | `5000` Cost of Goods Sold | `1200` Inventory |
-| Transfer / Adjustment | — (no journal entry in v1) | — |
+| Adjustment loss | `5100` Operating Expenses | `1200` Inventory |
+| Adjustment gain | `1200` Inventory | `5100` Operating Expenses |
+| Transfer | — (same inventory account) | — |
+
+Zero-value receipts, issues and adjustments post nothing; they are logged in the
+movement ledger only.
