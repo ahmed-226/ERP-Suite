@@ -16,7 +16,6 @@ interface IssueValues {
   productId: string;
   warehouseId: string;
   quantity: number;
-  unitCost?: number;
 }
 
 interface TransferValues {
@@ -30,7 +29,6 @@ interface AdjustmentValues {
   productId: string;
   warehouseId: string;
   quantityDelta: number;
-  unitCost?: number;
   reason: string;
 }
 
@@ -58,6 +56,7 @@ function useInvalidateInventory() {
   return () => {
     void queryClient.invalidateQueries({ queryKey: ['stock'] });
     void queryClient.invalidateQueries({ queryKey: ['movements'] });
+    void queryClient.invalidateQueries({ queryKey: ['inventory-valuation'] });
     void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
   };
 }
@@ -125,7 +124,6 @@ function IssueForm() {
         productId: values.productId,
         warehouseId: values.warehouseId,
         quantity: values.quantity,
-        unitCost: values.unitCost,
       }),
     onSuccess: () => {
       message.success('Goods issued and posted to the ledger');
@@ -146,14 +144,11 @@ function IssueForm() {
       <Form.Item name="quantity" label="Quantity" rules={[{ required: true, message: 'Enter a quantity' }]}>
         <InputNumber min={1} precision={0} style={{ width: '100%' }} />
       </Form.Item>
-      <Form.Item name="unitCost" label="Unit cost (optional)">
-        <InputNumber min={0} step={0.01} style={{ width: '100%' }} />
-      </Form.Item>
       <Button type="primary" loading={issue.isPending} onClick={() => form.submit()}>
         Issue goods
       </Button>
       <Typography.Paragraph type="secondary" style={{ marginTop: 12, fontSize: 12 }}>
-        Refuses to go negative; posts debit COGS, credit Inventory.
+        Refuses to go negative; posts debit COGS, credit Inventory at the product's weighted-average cost.
       </Typography.Paragraph>
       {issue.isError ? <Alert type="error" showIcon message={errorMessage(issue.error)} /> : null}
     </Form>
@@ -231,7 +226,6 @@ function AdjustmentForm() {
         productId: values.productId,
         warehouseId: values.warehouseId,
         quantityDelta: values.quantityDelta,
-        unitCost: values.unitCost,
         reason: values.reason,
       }),
     onSuccess: () => {
@@ -257,9 +251,6 @@ function AdjustmentForm() {
       >
         <InputNumber style={{ width: '100%' }} />
       </Form.Item>
-      <Form.Item name="unitCost" label="Unit cost (optional)">
-        <InputNumber min={0} step={0.01} style={{ width: '100%' }} />
-      </Form.Item>
       <Form.Item name="reason" label="Reason" rules={[{ required: true, message: 'Give a reason' }]}>
         <Input.TextArea rows={2} maxLength={500} placeholder="e.g. Damaged in storage" />
       </Form.Item>
@@ -267,7 +258,7 @@ function AdjustmentForm() {
         Apply adjustment
       </Button>
       <Typography.Paragraph type="secondary" style={{ marginTop: 12, fontSize: 12 }}>
-        Corrections only — the delta cannot drive stock negative.
+        Corrections only — the delta cannot drive stock negative and is valued at the product's weighted-average cost.
       </Typography.Paragraph>
       {adjust.isError ? <Alert type="error" showIcon message={errorMessage(adjust.error)} /> : null}
     </Form>

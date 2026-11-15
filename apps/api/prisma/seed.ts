@@ -1,6 +1,6 @@
 import bcrypt from 'bcrypt';
 import { PrismaPg } from '@prisma/adapter-pg';
-import { PERMISSIONS, seed } from '@erp/shared';
+import { money, PERMISSIONS, seed } from '@erp/shared';
 import { PrismaClient } from '../src/generated/prisma/client';
 import '../src/config/env';
 
@@ -110,7 +110,21 @@ async function main(): Promise<void> {
     });
   }
 
+  // Weighted-average cost starts at the cost of inbound seed movements, matching
+  // what the migration backfills for an existing database.
+  const inbound = new Map<string, { quantity: number; value: ReturnType<typeof money> }>();
+  for (const movement of movements) {
+    if (movement.quantity <= 0) continue;
+    if (movement.movementType !== 'GOODS_RECEIPT' && movement.movementType !== 'ADJUSTMENT') continue;
+    const entry = inbound.get(movement.productId) ?? { quantity: 0, value: money(0) };
+    entry.quantity += movement.quantity;
+    entry.value = entry.value.plus(money(movement.quantity).times(movement.unitCost));
+    inbound.set(movement.productId, entry);
+  }
+
   for (const product of products) {
+    const basis = inbound.get(product.productId);
+    const averageCost = basis && basis.quantity > 0 ? basis.value.dividedBy(basis.quantity) : money(0);
     await prisma.product.upsert({
       where: { productId: product.productId },
       update: {
@@ -119,8 +133,9 @@ async function main(): Promise<void> {
         description: product.description,
         unitOfMeasure: product.unitOfMeasure,
         reorderThreshold: product.reorderThreshold,
+        averageCost,
       },
-      create: { ...product },
+      create: { ...product, averageCost },
     });
   }
 

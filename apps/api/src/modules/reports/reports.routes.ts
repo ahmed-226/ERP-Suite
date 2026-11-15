@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { Decimal, moneyToNumber } from '@erp/shared';
+import { Decimal, money, moneyToNumber, sumMoney } from '@erp/shared';
 import { prisma } from '../../db/db';
 import { requireAuth, requirePermission } from '../../middleware/auth';
 import { entryInclude, serializeEntry } from '../journals/journal.view';
@@ -51,6 +51,43 @@ reportRouter.get('/trial-balance', requirePermission('reports:read'), async (req
       }))
       .sort((a, b) => a.accountCode.localeCompare(b.accountCode)),
   );
+});
+
+/** GET /reports/inventory-valuation — stock at the company-wide average cost. */
+reportRouter.get('/inventory-valuation', requirePermission('reports:read'), async (req, res) => {
+  const companyId = req.user!.companyId;
+  const groups = await prisma.inventoryStock.groupBy({
+    by: ['productId'],
+    where: { companyId },
+    _sum: { quantityOnHand: true },
+  });
+  const products = await prisma.product.findMany({
+    where: { companyId, productId: { in: groups.map((group) => group.productId) } },
+    select: { productId: true, sku: true, name: true, averageCost: true },
+  });
+  const byId = new Map(products.map((product) => [product.productId, product]));
+
+  const valued = groups
+    .map((group) => {
+      const product = byId.get(group.productId);
+      const quantityOnHand = group._sum.quantityOnHand ?? 0;
+      if (!product || quantityOnHand === 0) return null;
+      return {
+        productId: product.productId,
+        sku: product.sku,
+        productName: product.name,
+        quantityOnHand,
+        averageCost: moneyToNumber(product.averageCost),
+        value: money(quantityOnHand).times(product.averageCost.toString()),
+      };
+    })
+    .filter((row): row is NonNullable<typeof row> => row !== null)
+    .sort((a, b) => a.sku.localeCompare(b.sku));
+
+  res.status(200).json({
+    rows: valued.map((row) => ({ ...row, value: moneyToNumber(row.value) })),
+    totalValue: moneyToNumber(sumMoney(valued.map((row) => row.value))),
+  });
 });
 
 /** GET /reports/dashboard — counters + recent journals + low stock. */

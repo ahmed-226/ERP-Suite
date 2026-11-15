@@ -233,7 +233,7 @@ async function main(): Promise<void> {
   await prisma.chartOfAccount.createMany({ data: SUBACCOUNTS, skipDuplicates: true });
   await prisma.warehouse.createMany({ data: DEMO_WAREHOUSES, skipDuplicates: true });
   await prisma.product.createMany({
-    data: DEMO_PRODUCTS.map(({ unitCost: _cost, ...p }) => p),
+    data: DEMO_PRODUCTS.map(({ unitCost, ...p }) => ({ ...p, averageCost: unitCost })),
     skipDuplicates: true,
   });
 

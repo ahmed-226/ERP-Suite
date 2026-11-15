@@ -116,6 +116,7 @@ CSV.
 - Product catalog with SKUs, units of measure, and reorder thresholds.
 - Multiple warehouses with per-warehouse stock levels.
 - An immutable movement ledger (goods receipts, sales issues, transfers, adjustments) for full auditability.
+- Company-wide weighted-average valuation; issues and adjustments are costed server-side, never from client input.
 - Low-stock highlighting against reorder thresholds.
 - Goods receipts and sales issues post a balanced journal entry automatically.
 
@@ -126,7 +127,7 @@ CSV.
 ### Web application screens
 - **Dashboard** — company overview: account, product and journal counts, low-stock items, and recent journal entries.
 - **Accounting** — Chart of Accounts, Journal Entries, Trial Balance.
-- **Inventory** — Products, Warehouses, Stock Levels, Movements, and inventory operations (receipt, issue, transfer, adjustment).
+- **Inventory** — Products, Warehouses, Stock Levels, Movements, inventory operations (receipt, issue, transfer, adjustment), and Inventory Valuation.
 - **Settings** — users and roles.
 
 ## API Endpoints
@@ -194,6 +195,7 @@ envelope: `{ "error": { "code": "...", "message": "...", "details": ... } }`.
 | Method | Endpoint | Description |
 | --- | --- | --- |
 | GET | `/reports/dashboard` | Counts, low-stock items, and recent journal entries. |
+| GET | `/reports/inventory-valuation` | Stock on hand valued at each product's weighted-average cost. |
 | GET | `/health` | Service liveness and dependency health. |
 
 ### Users & Roles

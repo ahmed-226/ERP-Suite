@@ -10,6 +10,7 @@ import WarehousesPage from '@/pages/warehouses';
 import JournalsPage from '@/pages/journals';
 import JournalEditorPage from '@/pages/journals/JournalEditorPage';
 import TrialBalancePage from '@/pages/trialBalance';
+import InventoryValuationPage from '@/pages/inventoryValuation';
 import StockPage from '@/pages/stock';
 import MovementsPage from '@/pages/movements';
 import InventoryOperationsPage from '@/pages/operations';
@@ -68,6 +69,10 @@ export const router = createBrowserRouter([
       {
         path: 'inventory/operations',
         element: <InventoryOperationsPage />,
+      },
+      {
+        path: 'inventory/valuation',
+        element: <InventoryValuationPage />,
       },
 
       {

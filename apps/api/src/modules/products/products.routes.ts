@@ -19,6 +19,7 @@ const serialize = (p: ProductModel): Product => ({
   description: p.description,
   unitOfMeasure: p.unitOfMeasure,
   reorderThreshold: p.reorderThreshold,
+  averageCost: Number(p.averageCost),
   isActive: p.isActive,
   createdAt: p.createdAt.toISOString(),
 });

@@ -17,6 +17,7 @@ import {
   type EntryType,
   type InventoryStock,
   type InventoryTransaction,
+  type InventoryValuationReport,
   type IssueInput,
   type JournalEntry,
   type JournalEntryLine,
@@ -111,11 +112,31 @@ export class MockStore {
       isActive: true,
       createdAt: seedCreatedAt,
     }));
-    this.products = seed.products.map((p) => ({
-      ...p,
-      isActive: true,
-      createdAt: seedCreatedAt,
-    }));
+    // Same starting valuation the API seeder/migration derives: inbound seed
+    // movements set each product's weighted-average cost.
+    const inbound = new Map<string, { quantity: number; value: Decimal }>();
+    for (const movement of seed.movements) {
+      if (movement.quantity <= 0) continue;
+      if (movement.movementType !== 'GOODS_RECEIPT' && movement.movementType !== 'ADJUSTMENT') {
+        continue;
+      }
+      const entry = inbound.get(movement.productId) ?? { quantity: 0, value: new Decimal(0) };
+      entry.quantity += movement.quantity;
+      entry.value = entry.value.plus(money(movement.quantity).times(movement.unitCost));
+      inbound.set(movement.productId, entry);
+    }
+    this.products = seed.products.map((p) => {
+      const basis = inbound.get(p.productId);
+      return {
+        ...p,
+        averageCost:
+          basis && basis.quantity > 0
+            ? moneyToNumber(basis.value.dividedBy(basis.quantity))
+            : 0,
+        isActive: true,
+        createdAt: seedCreatedAt,
+      };
+    });
     this.warehouses = seed.warehouses.map((w) => ({
       ...w,
       isActive: true,
@@ -664,6 +685,7 @@ export class MockStore {
       description: input.description ?? null,
       unitOfMeasure: input.unitOfMeasure ?? 'PCS',
       reorderThreshold: input.reorderThreshold ?? 10,
+      averageCost: 0,
       isActive: input.isActive ?? true,
       createdAt: new Date().toISOString(),
     };
@@ -917,6 +939,15 @@ export class MockStore {
     this.warehouseById(input.warehouseId);
 
     const row = this.upsertStock(input.productId, input.warehouseId);
+    const totalQty = this.stock
+      .filter((s) => s.productId === input.productId)
+      .reduce((sum, s) => sum + s.quantityOnHand, 0);
+    product.averageCost = moneyToNumber(
+      money(totalQty)
+        .times(product.averageCost)
+        .plus(money(input.quantity).times(input.unitCost))
+        .dividedBy(totalQty + input.quantity),
+    );
     row.quantityOnHand += input.quantity;
     row.updatedAt = new Date().toISOString();
 
@@ -956,7 +987,7 @@ export class MockStore {
       );
     }
 
-    const unitCost = input.unitCost ?? 0;
+    const unitCost = product.averageCost;
     row!.quantityOnHand -= input.quantity;
     row!.updatedAt = new Date().toISOString();
 
@@ -997,7 +1028,7 @@ export class MockStore {
       );
     }
 
-    const unitCost = 0;
+    const unitCost = product.averageCost;
     from!.quantityOnHand -= input.quantity;
     from!.updatedAt = new Date().toISOString();
     const to = this.upsertStock(input.productId, input.toWarehouseId);
@@ -1045,7 +1076,7 @@ export class MockStore {
       input.warehouseId,
       'ADJUSTMENT',
       input.quantityDelta,
-      input.unitCost ?? 0,
+      product.averageCost,
       null,
     );
     return this.enrichMovement(movement);
@@ -1095,6 +1126,32 @@ export class MockStore {
         net: moneyToNumber(r.debit.minus(r.credit)),
       }))
       .sort((a, b) => a.accountCode.localeCompare(b.accountCode));
+  }
+
+  async inventoryValuation(): Promise<InventoryValuationReport> {
+    await this.wait();
+    const quantities = new Map<string, number>();
+    for (const row of this.stock) {
+      quantities.set(row.productId, (quantities.get(row.productId) ?? 0) + row.quantityOnHand);
+    }
+    const rows = [...quantities.entries()]
+      .map(([productId, quantityOnHand]) => {
+        const product = this.productById(productId);
+        return {
+          productId,
+          sku: product.sku,
+          productName: product.name,
+          quantityOnHand,
+          averageCost: product.averageCost,
+          value: moneyToNumber(money(quantityOnHand).times(product.averageCost)),
+        };
+      })
+      .filter((row) => row.quantityOnHand !== 0)
+      .sort((a, b) => a.sku.localeCompare(b.sku));
+    return {
+      rows,
+      totalValue: moneyToNumber(sumMoney(rows.map((row) => row.value))),
+    };
   }
 
   async dashboard(): Promise<DashboardStats> {

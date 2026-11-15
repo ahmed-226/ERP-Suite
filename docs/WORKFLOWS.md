@@ -122,13 +122,14 @@ sequenceDiagram
 
     U->>P: product, warehouse, qty, unit cost
     P->>S: inventory.receipt()
+    S->>S: averageCost = (onHand × avg + qty × cost) / (onHand + qty)
     S->>ST: quantityOnHand += qty
-    S->>M: append GOODS_RECEIPT (+qty, unitCost)
+    S->>M: append GOODS_RECEIPT (+qty, new valuation cost)
     S->>J: create POSTED entry<br/>DR 1200 Inventory / CR 2000 AP = qty × cost
     S-->>P: movement + updated stock
 ```
 
-One operation produces **one stock increase, one append-only movement, and one balanced POSTED journal entry**.
+One operation produces **one stock increase, one append-only movement, and one balanced POSTED journal entry**. The receipt cost also blends into the product's company-wide weighted-average cost.
 
 ## 8. Sales issue
 
@@ -137,9 +138,11 @@ flowchart TD
     A["Issue form"] --> B{"Stock on hand<br/>≥ quantity?"}
     B -- "no" --> C["Reject: INSUFFICIENT_STOCK<br/>(clear message with available qty)"]
     B -- "yes" --> D["quantityOnHand -= qty"]
-    D --> E["Append SALES_ISSUE movement (-qty)"]
-    E --> F["Auto-post DR 5000 COGS / CR 1200 Inventory"]
+    D --> E["Append SALES_ISSUE movement (-qty)<br/>costed at product.averageCost"]
+    E --> F["Auto-post DR 5000 COGS / CR 1200 Inventory<br/>= averageCost × qty"]
 ```
+
+Issue cost is never client-supplied; the form only collects product, warehouse and quantity.
 
 ## 9. Warehouse transfer
 
@@ -149,7 +152,7 @@ flowchart TD
     B -- "no" --> C["Reject (form rule or<br/>INSUFFICIENT_STOCK)"]
     B -- "yes" --> D["Source: quantityOnHand -= qty"]
     D --> E["Destination: quantityOnHand += qty<br/>(row created lazily if new)"]
-    E --> F["Append paired movements:<br/>TRANSFER_OUT (-qty) + TRANSFER_IN (+qty)"]
+    E --> F["Append paired movements:<br/>TRANSFER_OUT (-qty) + TRANSFER_IN (+qty)<br/>both valued at averageCost"]
     F --> G["No journal entry in v1"]
 ```
 
@@ -160,9 +163,24 @@ flowchart TD
     A["Adjustment form<br/>(reason required)"] --> B{"Delta ≠ 0 and<br/>result ≥ 0?"}
     B -- "no" --> C["Reject: INSUFFICIENT_STOCK"]
     B -- "yes" --> D["Apply delta to stock"]
-    D --> E["Append ADJUSTMENT movement"]
+    D --> E["Append ADJUSTMENT movement<br/>valued at averageCost"]
     E --> F["No journal entry in v1"]
 ```
+
+## 10a. Inventory valuation report
+
+The report multiplies each product's company-wide on-hand quantity by its
+running `averageCost`:
+
+```
+value(product) = Σ stock.quantityOnHand × product.averageCost
+report.totalValue = Σ value(product)
+```
+
+`GET /reports/inventory-valuation` returns the rows and total used by the
+Inventory → Valuation page. Because receipts, issues and adjustments all carry
+the same valuation cost, the total reconciles to the `1200` Inventory account
+once every stock movement has posted its GL entry.
 
 ## 11. Assigning a role (Settings)
 

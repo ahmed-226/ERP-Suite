@@ -69,7 +69,7 @@ describe('inventory → GL integration', () => {
     const res = await request(app)
       .post('/api/v1/inventory/issues')
       .set(auth())
-      .send({ productId, warehouseId, quantity: 4, unitCost: 7.5 });
+      .send({ productId, warehouseId, quantity: 4 });
     expect(res.status).toBe(201);
 
     const entry = await prisma.journalEntry.findFirst({
@@ -85,16 +85,25 @@ describe('inventory → GL integration', () => {
     expect(Number(debitLine!.amount)).toBe(30);
   });
 
-  it('zero-cost movements skip the GL entry', async () => {
+  it('prices issues from the valuation cost, ignoring any client-supplied unitCost', async () => {
+    const product = await prisma.product.findUniqueOrThrow({ where: { productId } });
     const res = await request(app)
       .post('/api/v1/inventory/issues')
       .set(auth())
       .send({ productId, warehouseId, quantity: 1, unitCost: 0 });
     expect(res.status).toBe(201);
+    expect(Number(res.body.unitCost)).toBe(Number(product.averageCost));
+
     const entry = await prisma.journalEntry.findFirst({
-      where: { referenceId: res.body.transactionId },
+      where: { referenceId: res.body.transactionId, referenceType: 'SALES_ISSUE' },
+      include: { lines: true },
     });
-    expect(entry).toBeNull();
+    expect(entry).toBeTruthy();
+    expect(entry!.status).toBe('POSTED');
+    const debit = entry!.lines
+      .filter((l) => l.entryType === 'DEBIT')
+      .reduce((sum, l) => sum + Number(l.amount), 0);
+    expect(debit).toBe(Number(product.averageCost));
   });
 
   it('a failed movement rolls back everything (no orphan stock or journal)', async () => {
@@ -102,20 +111,22 @@ describe('inventory → GL integration', () => {
     const stockBefore = await prisma.inventoryStock.findFirst({
       where: { productId, warehouseId },
     });
+    const entriesBefore = await prisma.journalEntry.count({
+      where: { referenceId: { not: null }, referenceType: 'SALES_ISSUE' },
+    });
     const res = await request(app)
       .post('/api/v1/inventory/issues')
       .set(auth())
-      .send({ productId, warehouseId, quantity: 999999, unitCost: 1 });
+      .send({ productId, warehouseId, quantity: 999999 });
     expect(res.status).toBe(422);
 
     const stockAfter = await prisma.inventoryStock.findFirst({
       where: { productId, warehouseId },
     });
     expect(stockAfter!.quantityOnHand).toBe(stockBefore!.quantityOnHand);
-    const entries = await prisma.journalEntry.count({
-      where: { referenceId: { not: null }, createdAt: { gte: new Date(Date.now() - 5000) }, referenceType: 'SALES_ISSUE' },
+    const entriesAfter = await prisma.journalEntry.count({
+      where: { referenceId: { not: null }, referenceType: 'SALES_ISSUE' },
     });
-    // The number of entries stays whatever it was — nothing new for the failed op.
-    expect(entries).toBeLessThan(3);
+    expect(entriesAfter).toBe(entriesBefore);
   });
 });

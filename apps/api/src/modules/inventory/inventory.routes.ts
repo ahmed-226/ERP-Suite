@@ -129,6 +129,26 @@ inventoryRouter.post('/receipts', requirePermission('inventory:write'), async (r
   await assertWarehouseInCompany(companyId, input.warehouseId);
 
   const movement = await prisma.$transaction(async (tx) => {
+    // Moving average is company-wide: blend the received cost into the value of
+    // all on-hand units before the stock delta lands.
+    const product = await tx.product.findUniqueOrThrow({
+      where: { productId: input.productId },
+      select: { averageCost: true },
+    });
+    const onHand = await tx.inventoryStock.aggregate({
+      where: { companyId, productId: input.productId },
+      _sum: { quantityOnHand: true },
+    });
+    const existingQty = onHand._sum.quantityOnHand ?? 0;
+    const newAverage = money(existingQty)
+      .times(product.averageCost.toString())
+      .plus(money(input.quantity).times(input.unitCost))
+      .dividedBy(existingQty + input.quantity);
+    await tx.product.update({
+      where: { productId: input.productId },
+      data: { averageCost: newAverage },
+    });
+
     await applyStockDelta(tx, {
       companyId,
       productId: input.productId,
@@ -173,6 +193,11 @@ inventoryRouter.post('/issues', requirePermission('inventory:write'), async (req
   await assertWarehouseInCompany(companyId, input.warehouseId);
 
   const movement = await prisma.$transaction(async (tx) => {
+    const product = await tx.product.findUniqueOrThrow({
+      where: { productId: input.productId },
+      select: { averageCost: true },
+    });
+    const unitCost = Number(product.averageCost);
     await applyStockDelta(tx, {
       companyId,
       productId: input.productId,
@@ -185,12 +210,12 @@ inventoryRouter.post('/issues', requirePermission('inventory:write'), async (req
       warehouseId: input.warehouseId,
       movementType: 'SALES_ISSUE',
       quantity: input.quantity,
-      unitCost: input.unitCost ?? 0,
+      unitCost,
       referenceId: input.referenceId ?? null,
       userId: req.user!.userId,
     });
-    // Inventory → GL (WORKFLOWS.md §8): DR COGS / CR Inventory.
-    const amount = money(input.quantity).times(input.unitCost ?? 0);
+    // Inventory → GL (WORKFLOWS.md §8): DR COGS / CR Inventory, at valuation cost.
+    const amount = money(input.quantity).times(unitCost);
     if (!amount.isZero()) {
       const accounts = await systemAccountIds(tx, companyId);
       await postInventoryJournal(tx, {
@@ -218,6 +243,11 @@ inventoryRouter.post('/transfers', requirePermission('inventory:write'), async (
   await assertWarehouseInCompany(companyId, input.toWarehouseId);
 
   const movements = await prisma.$transaction(async (tx) => {
+    const product = await tx.product.findUniqueOrThrow({
+      where: { productId: input.productId },
+      select: { averageCost: true },
+    });
+    const unitCost = Number(product.averageCost);
     await applyStockDelta(tx, {
       companyId,
       productId: input.productId,
@@ -236,7 +266,7 @@ inventoryRouter.post('/transfers', requirePermission('inventory:write'), async (
       warehouseId: input.fromWarehouseId,
       movementType: 'TRANSFER_OUT',
       quantity: input.quantity,
-      unitCost: 0,
+      unitCost,
       referenceId: null,
       userId: req.user!.userId,
     });
@@ -246,7 +276,7 @@ inventoryRouter.post('/transfers', requirePermission('inventory:write'), async (
       warehouseId: input.toWarehouseId,
       movementType: 'TRANSFER_IN',
       quantity: input.quantity,
-      unitCost: 0,
+      unitCost,
       referenceId: out.transactionId,
       userId: req.user!.userId,
     });
@@ -263,6 +293,10 @@ inventoryRouter.post('/adjustments', requirePermission('inventory:write'), async
   await assertWarehouseInCompany(companyId, input.warehouseId);
 
   const movement = await prisma.$transaction(async (tx) => {
+    const product = await tx.product.findUniqueOrThrow({
+      where: { productId: input.productId },
+      select: { averageCost: true },
+    });
     await applyStockDelta(tx, {
       companyId,
       productId: input.productId,
@@ -275,7 +309,7 @@ inventoryRouter.post('/adjustments', requirePermission('inventory:write'), async
       warehouseId: input.warehouseId,
       movementType: 'ADJUSTMENT',
       quantity: input.quantityDelta,
-      unitCost: input.unitCost ?? 0,
+      unitCost: Number(product.averageCost),
       referenceId: null,
       userId: req.user!.userId,
     });

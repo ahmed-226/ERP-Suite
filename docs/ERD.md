@@ -65,6 +65,7 @@ erDiagram
         string name
         string unitOfMeasure
         int reorderThreshold
+        decimal averageCost "company-wide weighted average"
         boolean isActive
     }
     WAREHOUSE {
@@ -121,7 +122,7 @@ erDiagram
 | `ROLE` | seed roles | Named permission bundle: `ADMIN`, `ACCOUNTANT`, `STOREKEEPER`, `VIEWER`. | Permissions are a flattened list per role (Stage B normalizes into `permissions` + `role_permissions` tables). |
 | `USER` | seed users | A sign-in identity with email, name and one assigned role. | Login requires exact email + password (`INVALID_CREDENTIALS` otherwise). |
 | `ACCOUNT` | `accounts` state | Chart-of-accounts node; self-referencing tree via `parentAccountId`. | Unique code (`DUPLICATE_CODE`); parent assignment must not create a cycle (`INVALID_PARENT`); `accountType` is fixed once journal lines exist (`ACCOUNT_TYPE_IN_USE`); cannot be deleted while it has children or journal lines (`ACCOUNT_IN_USE`). |
-| `PRODUCT` | `products` state | Item catalog entry (SKU, unit of measure, reorder threshold). | Unique SKU (`DUPLICATE_SKU`); cannot be deleted with stock on hand or movement history (`PRODUCT_IN_USE`). |
+| `PRODUCT` | `products` state | Item catalog entry (SKU, unit of measure, reorder threshold, running weighted-average cost). | Unique SKU (`DUPLICATE_SKU`); cannot be deleted with stock on hand or movement history (`PRODUCT_IN_USE`); `averageCost` is maintained by receipts and drives issue/adjustment valuation. |
 | `WAREHOUSE` | `warehouses` state | Stock-keeping location. | Unique code; cannot be deleted while holding stock or having movement history (`WAREHOUSE_IN_USE`). |
 | `INVENTORY_STOCK` | `stock` rows | Per-(product, warehouse) quantity bucket. Created lazily on first movement. | `quantityOnHand` can never go negative (DB CHECK mirrored in code). |
 | `INVENTORY_TRANSACTION` | `movements` list | Append-only movement ledger. Signed quantity: positive = in, negative = out. | Rows are never updated or deleted — new facts are new rows. |

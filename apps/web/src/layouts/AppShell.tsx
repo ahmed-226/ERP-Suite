@@ -83,6 +83,11 @@ export function AppShell() {
           icon: <SwapOutlined />,
           label: 'Operations',
         },
+        can('inventory:read') && {
+          key: '/inventory/valuation',
+          icon: <DatabaseOutlined />,
+          label: 'Valuation',
+        },
       ].filter(Boolean) as MenuItems
     );
 

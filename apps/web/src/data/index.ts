@@ -12,6 +12,7 @@ import type {
   DashboardStats,
   InventoryStock,
   InventoryTransaction,
+  InventoryValuationReport,
   IssueInput,
   JournalEntry,
   JournalFilter,
@@ -91,6 +92,7 @@ export interface InventoryApi {
 
 export interface ReportsApi {
   trialBalance(filter: TrialBalanceFilter): Promise<TrialBalanceRow[]>;
+  inventoryValuation(): Promise<InventoryValuationReport>;
   dashboard(): Promise<DashboardStats>;
 }
 

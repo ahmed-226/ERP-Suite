@@ -225,4 +225,57 @@ describe('MockStore inventory invariants', () => {
     expect(accountsPayable.accountCode).toBe('2000');
     expect(cogs.accountCode).toBe('5000');
   });
+
+  it('blends receipts into the average and prices every outflow server-side', async () => {
+    const store = await newStore();
+    const product = await store.createProduct({ sku: 'AVG-TEST-1', name: 'Average test product' });
+    expect(product.averageCost).toBe(0);
+
+    await store.receipt({
+      productId: product.productId,
+      warehouseId: mainWarehouse,
+      quantity: 10,
+      unitCost: 10,
+    });
+    await store.receipt({
+      productId: product.productId,
+      warehouseId: mainWarehouse,
+      quantity: 10,
+      unitCost: 20,
+    });
+    expect((await store.getProduct(product.productId)).averageCost).toBe(15);
+
+    const issue = await store.issue({
+      productId: product.productId,
+      warehouseId: mainWarehouse,
+      quantity: 4,
+    });
+    expect(issue.unitCost).toBe(15);
+
+    const adjustment = await store.adjust({
+      productId: product.productId,
+      warehouseId: mainWarehouse,
+      quantityDelta: -2,
+      reason: 'Damage',
+    });
+    expect(adjustment.unitCost).toBe(15);
+
+    const [out, into] = await store.transfer({
+      productId: product.productId,
+      fromWarehouseId: mainWarehouse,
+      toWarehouseId: secondaryWarehouse,
+      quantity: 3,
+    });
+    expect(out.unitCost).toBe(15);
+    expect(into.unitCost).toBe(15);
+
+    const report = await store.inventoryValuation();
+    expect(report.rows.find((row) => row.productId === product.productId)).toMatchObject({
+      quantityOnHand: 14,
+      averageCost: 15,
+      value: 210,
+    });
+    const summed = report.rows.reduce((sum, row) => sum + row.value, 0);
+    expect(report.totalValue).toBeCloseTo(summed, 4);
+  });
 });

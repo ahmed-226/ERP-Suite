@@ -17,6 +17,21 @@ export interface TrialBalanceFilter {
   to: string;
 }
 
+/** One product's stock valued at the company-wide weighted-average cost. */
+export interface InventoryValuationRow {
+  productId: string;
+  sku: string;
+  productName: string;
+  quantityOnHand: number;
+  averageCost: number;
+  value: number;
+}
+
+export interface InventoryValuationReport {
+  rows: InventoryValuationRow[];
+  totalValue: number;
+}
+
 export interface DashboardStats {
   accountsCount: number;
   productsCount: number;

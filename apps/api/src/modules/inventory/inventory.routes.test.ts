@@ -131,3 +131,111 @@ describe('inventory movements', () => {
     expect(res.status).toBe(403);
   });
 });
+
+describe('weighted-average inventory valuation', () => {
+  it('blends receipts into the average and prices every outflow server-side', async () => {
+    const sku = `TEST-AVG-${Date.now()}`;
+    const created = await request(app)
+      .post('/api/v1/products')
+      .set(auth(admin))
+      .send({ sku, name: 'Average cost test product' });
+    expect(created.status).toBe(201);
+    const avgProductId = created.body.productId as string;
+    expect(created.body.averageCost).toBe(0);
+
+    const secondWarehouse = (
+      await request(app).get('/api/v1/warehouses').set(auth(admin))
+    ).body[1].warehouseId as string;
+
+    await request(app)
+      .post('/api/v1/inventory/receipts')
+      .set(auth(store))
+      .send({ productId: avgProductId, warehouseId, quantity: 10, unitCost: 10 })
+      .expect(201);
+    await request(app)
+      .post('/api/v1/inventory/receipts')
+      .set(auth(store))
+      .send({ productId: avgProductId, warehouseId, quantity: 10, unitCost: 20 })
+      .expect(201);
+
+    const product = await request(app).get(`/api/v1/products/${avgProductId}`).set(auth(admin));
+    expect(product.body.averageCost).toBe(15);
+
+    // A client-supplied unitCost is not part of the contract and cannot win.
+    const issue = await request(app)
+      .post('/api/v1/inventory/issues')
+      .set(auth(store))
+      .send({ productId: avgProductId, warehouseId, quantity: 4, unitCost: 999 });
+    expect(issue.status).toBe(201);
+    expect(issue.body.unitCost).toBe(15);
+
+    const adjustment = await request(app)
+      .post('/api/v1/inventory/adjustments')
+      .set(auth(store))
+      .send({ productId: avgProductId, warehouseId, quantityDelta: -2, reason: 'Damage' });
+    expect(adjustment.status).toBe(201);
+    expect(adjustment.body.unitCost).toBe(15);
+
+    const transfer = await request(app)
+      .post('/api/v1/inventory/transfers')
+      .set(auth(store))
+      .send({
+        productId: avgProductId,
+        fromWarehouseId: warehouseId,
+        toWarehouseId: secondWarehouse,
+        quantity: 3,
+      });
+    expect(transfer.status).toBe(201);
+    expect(transfer.body.map((m: { unitCost: number }) => m.unitCost)).toEqual([15, 15]);
+
+    const report = await request(app)
+      .get('/api/v1/reports/inventory-valuation')
+      .set(auth(admin));
+    expect(report.status).toBe(200);
+    const row = report.body.rows.find(
+      (r: { productId: string }) => r.productId === avgProductId,
+    );
+    expect(row).toMatchObject({ quantityOnHand: 14, averageCost: 15, value: 210 });
+    const summed = report.body.rows.reduce(
+      (sum: number, r: { value: number }) => sum + r.value,
+      0,
+    );
+    expect(report.body.totalValue).toBeCloseTo(summed, 4);
+  });
+
+  it('records COGS at valuation cost on the issue journal', async () => {
+    const before = await request(app)
+      .get('/api/v1/reports/trial-balance')
+      .query({ from: '2000-01-01', to: '2100-01-01' })
+      .set(auth(admin));
+    const cogsBefore = before.body.find((r: { accountCode: string }) => r.accountCode === '5000');
+    const inventoryBefore = before.body.find((r: { accountCode: string }) => r.accountCode === '1200');
+
+    const sku = `TEST-COGS-${Date.now()}`;
+    const created = await request(app)
+      .post('/api/v1/products')
+      .set(auth(admin))
+      .send({ sku, name: 'COGS test product' });
+    const cogsProductId = created.body.productId as string;
+
+    await request(app)
+      .post('/api/v1/inventory/receipts')
+      .set(auth(store))
+      .send({ productId: cogsProductId, warehouseId, quantity: 20, unitCost: 7.25 });
+    await request(app)
+      .post('/api/v1/inventory/issues')
+      .set(auth(store))
+      .send({ productId: cogsProductId, warehouseId, quantity: 8 })
+      .expect(201);
+
+    const after = await request(app)
+      .get('/api/v1/reports/trial-balance')
+      .query({ from: '2000-01-01', to: '2100-01-01' })
+      .set(auth(admin));
+    const cogsAfter = after.body.find((r: { accountCode: string }) => r.accountCode === '5000');
+    const inventoryAfter = after.body.find((r: { accountCode: string }) => r.accountCode === '1200');
+
+    expect(cogsAfter.debit - (cogsBefore?.debit ?? 0)).toBeCloseTo(8 * 7.25, 4);
+    expect(inventoryAfter.net - (inventoryBefore?.net ?? 0)).toBeCloseTo(20 * 7.25 - 8 * 7.25, 4);
+  });
+});

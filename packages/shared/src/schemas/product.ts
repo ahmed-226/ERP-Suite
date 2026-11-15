@@ -21,6 +21,8 @@ export interface Product {
   description: string | null;
   unitOfMeasure: string;
   reorderThreshold: number;
+  /** Running company-wide weighted-average cost, maintained by stock receipts. */
+  averageCost: number;
   isActive: boolean;
   createdAt: string;
 }

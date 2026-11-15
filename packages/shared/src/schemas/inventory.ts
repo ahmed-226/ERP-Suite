@@ -15,7 +15,6 @@ export const issueSchema = z.object({
   productId: z.string().uuid(),
   warehouseId: z.string().uuid(),
   quantity: z.number().int().positive(),
-  unitCost: z.number().min(0).optional(),
   referenceType: z.string().max(50).nullable().optional(),
   referenceId: z.string().uuid().nullable().optional(),
 });
@@ -41,7 +40,6 @@ export const adjustmentSchema = z.object({
     .number()
     .int()
     .refine((n) => n !== 0, 'Adjustment delta cannot be zero'),
-  unitCost: z.number().min(0).optional(),
   reason: z.string().min(1).max(500),
 });
 export type AdjustmentInput = z.infer<typeof adjustmentSchema>;

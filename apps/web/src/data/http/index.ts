@@ -12,6 +12,7 @@ import type {
   DashboardStats,
   InventoryStock,
   InventoryTransaction,
+  InventoryValuationReport,
   IssueInput,
   JournalEntry,
   JournalFilter,
@@ -158,6 +159,7 @@ export function createHttpDataSource(
     reports: {
       trialBalance: (filter: TrialBalanceFilter) =>
         get<TrialBalanceRow[]>('/reports/trial-balance', { from: filter.from, to: filter.to }),
+      inventoryValuation: () => get<InventoryValuationReport>('/reports/inventory-valuation'),
       dashboard: () => get<DashboardStats>('/reports/dashboard'),
     },
     users: {
