@@ -1,12 +1,12 @@
 import { Router } from 'express';
 import {
   createJournalSchema,
+  journalFilterSchema,
   moneyToNumber,
   REVERSAL_REFERENCE_TYPE,
   signedAmount,
   sumMoney,
   updateJournalSchema,
-  type JournalFilter,
 } from '@erp/shared';
 import { prisma } from '../../db/db';
 import { ApiError, notFound } from '../../lib/errors';
@@ -63,7 +63,7 @@ async function reversalLinks(companyId: string, entryIds?: string[]): Promise<Ma
 
 /** GET /journals?status=&referenceType=&from=&to=&search= */
 journalRouter.get('/', requirePermission('journals:read'), async (req, res) => {
-  const filter = req.query as JournalFilter;
+  const filter = journalFilterSchema.parse(req.query);
   const companyId = req.user!.companyId;
   const [entries, links] = await Promise.all([
     prisma.journalEntry.findMany({

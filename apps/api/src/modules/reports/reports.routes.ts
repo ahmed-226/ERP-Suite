@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { Decimal, money, moneyToNumber, sumMoney } from '@erp/shared';
+import { Decimal, money, moneyToNumber, sumMoney, trialBalanceFilterSchema } from '@erp/shared';
 import { prisma } from '../../db/db';
 import { requireAuth, requirePermission } from '../../middleware/auth';
 import { entryInclude, serializeEntry } from '../journals/journal.view';
@@ -10,8 +10,7 @@ reportRouter.use(requireAuth);
 
 /** GET /reports/trial-balance?from=&to= — posted entries only. */
 reportRouter.get('/trial-balance', requirePermission('reports:read'), async (req, res) => {
-  const from = String(req.query.from ?? '');
-  const to = String(req.query.to ?? '');
+  const { from, to } = trialBalanceFilterSchema.parse(req.query);
   const entries = await prisma.journalEntry.findMany({
     where: {
       companyId: req.user!.companyId,

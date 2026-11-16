@@ -1,6 +1,8 @@
+import { z } from 'zod';
 import type { AccountType } from '../constants';
 import type { InventoryStock } from './inventory';
 import type { JournalEntry } from './journal';
+import { isoDateSchema } from './common';
 
 export interface TrialBalanceRow {
   accountId: string;
@@ -12,10 +14,12 @@ export interface TrialBalanceRow {
   net: number;
 }
 
-export interface TrialBalanceFilter {
-  from: string;
-  to: string;
-}
+export const trialBalanceFilterSchema = z.object({
+  from: isoDateSchema.default('0001-01-01'),
+  to: isoDateSchema.default('9999-12-31'),
+});
+
+export type TrialBalanceFilter = z.infer<typeof trialBalanceFilterSchema>;
 
 /** One product's stock valued at the company-wide weighted-average cost. */
 export interface InventoryValuationRow {

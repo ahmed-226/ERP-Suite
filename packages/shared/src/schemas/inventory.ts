@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import type { MovementType } from '../constants';
+import { MOVEMENT_TYPES, type MovementType } from '../constants';
+import { optionalIsoDateSchema, uuidSchema } from './common';
 
 export const receiptSchema = z.object({
   productId: z.string().uuid(),
@@ -75,17 +76,31 @@ export interface InventoryTransaction {
   createdAt: string;
 }
 
-export interface StockFilter {
-  productId?: string;
-  warehouseId?: string;
-  lowStock?: boolean;
-  search?: string;
-}
+const emptyToUndefined = (value: unknown) => (value === '' ? undefined : value);
 
-export interface MovementFilter {
-  productId?: string;
-  warehouseId?: string;
-  movementType?: MovementType;
-  from?: string;
-  to?: string;
-}
+export const stockFilterSchema = z.object({
+  productId: z.preprocess(emptyToUndefined, uuidSchema.optional()),
+  warehouseId: z.preprocess(emptyToUndefined, uuidSchema.optional()),
+  lowStock: z.preprocess((value) => {
+    if (value === undefined || value === '') return undefined;
+    if (value === 'true' || value === true) return true;
+    if (value === 'false' || value === false) return false;
+    return value;
+  }, z.boolean().optional()),
+  search: z.preprocess(
+    (value) => (typeof value === 'string' ? value.trim() || undefined : value),
+    z.string().optional(),
+  ),
+});
+
+export type StockFilter = z.infer<typeof stockFilterSchema>;
+
+export const movementFilterSchema = z.object({
+  productId: z.preprocess(emptyToUndefined, uuidSchema.optional()),
+  warehouseId: z.preprocess(emptyToUndefined, uuidSchema.optional()),
+  movementType: z.preprocess(emptyToUndefined, z.enum(MOVEMENT_TYPES).optional()),
+  from: optionalIsoDateSchema,
+  to: optionalIsoDateSchema,
+});
+
+export type MovementFilter = z.infer<typeof movementFilterSchema>;

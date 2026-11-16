@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { ENTRY_TYPES, type EntryType, type JournalStatus } from '../constants';
-import { isoDateSchema } from './common';
+import { ENTRY_TYPES, JOURNAL_STATUSES, type EntryType, type JournalStatus } from '../constants';
+import { isoDateSchema, optionalIsoDateSchema } from './common';
 
 export const journalLineInputSchema = z.object({
   accountId: z.string().uuid(),
@@ -51,10 +51,18 @@ export interface JournalEntry {
   totalCredit: number;
 }
 
-export interface JournalFilter {
-  status?: JournalStatus;
-  referenceType?: string;
-  from?: string;
-  to?: string;
-  search?: string;
-}
+export const journalFilterSchema = z.object({
+  status: z.preprocess((value) => (value === '' ? undefined : value), z.enum(JOURNAL_STATUSES).optional()),
+  referenceType: z.preprocess(
+    (value) => (typeof value === 'string' ? value.trim() || undefined : value),
+    z.string().optional(),
+  ),
+  from: optionalIsoDateSchema,
+  to: optionalIsoDateSchema,
+  search: z.preprocess(
+    (value) => (typeof value === 'string' ? value.trim() || undefined : value),
+    z.string().optional(),
+  ),
+});
+
+export type JournalFilter = z.infer<typeof journalFilterSchema>;

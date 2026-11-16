@@ -3,11 +3,11 @@ import {
   adjustmentSchema,
   issueSchema,
   money,
+  movementFilterSchema,
   receiptSchema,
   signedMovementQuantity,
+  stockFilterSchema,
   transferSchema,
-  type MovementFilter,
-  type StockFilter,
 } from '@erp/shared';
 import { prisma } from '../../db/db';
 import { notFound } from '../../lib/errors';
@@ -44,7 +44,7 @@ async function assertWarehouseInCompany(companyId: string, warehouseId: string):
 
 /** GET /inventory/stock?productId=&warehouseId=&lowStock=&search= */
 inventoryRouter.get('/stock', requirePermission('inventory:read'), async (req, res) => {
-  const filter = req.query as StockFilter;
+  const filter = stockFilterSchema.parse(req.query);
   const rows = await prisma.inventoryStock.findMany({
     where: {
       companyId: req.user!.companyId,
@@ -72,7 +72,7 @@ inventoryRouter.get('/stock', requirePermission('inventory:read'), async (req, r
 
 /** GET /inventory/movements?productId=&warehouseId=&movementType=&from=&to= */
 inventoryRouter.get('/movements', requirePermission('inventory:read'), async (req, res) => {
-  const filter = req.query as MovementFilter;
+  const filter = movementFilterSchema.parse(req.query);
   const movements = await prisma.inventoryTransaction.findMany({
     where: {
       companyId: req.user!.companyId,

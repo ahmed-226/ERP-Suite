@@ -33,3 +33,6 @@ coverage/
 
 # local design docs and dev notes (kept on disk, not tracked)
 /dev/
+.opencode/
+
+AGENTS.md
