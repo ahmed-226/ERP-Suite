@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import type { Request } from 'express';
 import {
   adjustmentSchema,
   issueSchema,
@@ -25,6 +26,48 @@ import { postInventoryJournal, systemAccountIds } from '../integration/gl-postin
 export const inventoryRouter = Router();
 
 inventoryRouter.use(requireAuth);
+
+function idempotencyKey(req: Request): string | null {
+  const value = req.header('idempotency-key');
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+async function withInventoryIdempotency<T>(
+  req: Request,
+  operation: string,
+  work: (tx: PrismaTx) => Promise<T>,
+): Promise<{ status: number; body: T }> {
+  const key = idempotencyKey(req);
+  if (!key) {
+    const body = await prisma.$transaction((tx) => work(tx));
+    return { status: 201, body };
+  }
+
+  const companyId = req.user!.companyId;
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('erp-inventory-idempotency'), hashtext(${companyId}), hashtext(${key}))`;
+    const existing = await tx.inventoryIdempotencyKey.findUnique({
+      where: { companyId_key: { companyId, key } },
+      select: { statusCode: true, response: true },
+    });
+    if (existing) {
+      return { status: existing.statusCode, body: existing.response as T };
+    }
+    const body = await work(tx);
+    await tx.inventoryIdempotencyKey.create({
+      data: {
+        companyId,
+        key,
+        operation,
+        statusCode: 201,
+        response: body as object,
+      },
+    });
+    return { status: 201, body };
+  });
+}
 
 async function assertProductInCompany(companyId: string, productId: string): Promise<void> {
   const exists = await prisma.product.findFirst({
@@ -130,7 +173,7 @@ inventoryRouter.post('/receipts', requirePermission('inventory:write'), async (r
   await assertProductInCompany(companyId, input.productId);
   await assertWarehouseInCompany(companyId, input.warehouseId);
 
-  const movement = await prisma.$transaction(async (tx) => {
+  const result = await withInventoryIdempotency(req, 'receipt', async (tx) => {
     // Moving average is company-wide: blend the received cost into the value of
     // all on-hand units before the stock delta lands. Locking the product first
     // keeps concurrent receipts from overwriting each other's blend.
@@ -183,9 +226,9 @@ inventoryRouter.post('/receipts', requirePermission('inventory:write'), async (r
         amount,
       });
     }
-    return created;
+    return serializeMovement(created);
   });
-  res.status(201).json(serializeMovement(movement));
+  res.status(result.status).json(result.body);
 });
 
 /** POST /inventory/issues — stock out; fails on insufficient stock. */
@@ -195,7 +238,7 @@ inventoryRouter.post('/issues', requirePermission('inventory:write'), async (req
   await assertProductInCompany(companyId, input.productId);
   await assertWarehouseInCompany(companyId, input.warehouseId);
 
-  const movement = await prisma.$transaction(async (tx) => {
+  const result = await withInventoryIdempotency(req, 'issue', async (tx) => {
     const product = await tx.product.findUniqueOrThrow({
       where: { productId: input.productId },
       select: { averageCost: true },
@@ -231,9 +274,9 @@ inventoryRouter.post('/issues', requirePermission('inventory:write'), async (req
         amount,
       });
     }
-    return created;
+    return serializeMovement(created);
   });
-  res.status(201).json(serializeMovement(movement));
+  res.status(result.status).json(result.body);
 });
 
 /** POST /inventory/transfers — TRANSFER_OUT + TRANSFER_IN pair. */
@@ -244,7 +287,7 @@ inventoryRouter.post('/transfers', requirePermission('inventory:write'), async (
   await assertWarehouseInCompany(companyId, input.fromWarehouseId);
   await assertWarehouseInCompany(companyId, input.toWarehouseId);
 
-  const movements = await prisma.$transaction(async (tx) => {
+  const result = await withInventoryIdempotency(req, 'transfer', async (tx) => {
     const product = await tx.product.findUniqueOrThrow({
       where: { productId: input.productId },
       select: { averageCost: true },
@@ -278,9 +321,9 @@ inventoryRouter.post('/transfers', requirePermission('inventory:write'), async (
       referenceId: out.transactionId,
       userId: req.user!.userId,
     });
-    return [out, inc];
+    return [out, inc].map(serializeMovement);
   });
-  res.status(201).json(movements.map(serializeMovement));
+  res.status(result.status).json(result.body);
 });
 
 /** POST /inventory/adjustments — signed delta with a reason. */
@@ -290,7 +333,7 @@ inventoryRouter.post('/adjustments', requirePermission('inventory:write'), async
   await assertProductInCompany(companyId, input.productId);
   await assertWarehouseInCompany(companyId, input.warehouseId);
 
-  const movement = await prisma.$transaction(async (tx) => {
+  const result = await withInventoryIdempotency(req, 'adjustment', async (tx) => {
     const product = await tx.product.findUniqueOrThrow({
       where: { productId: input.productId },
       select: { averageCost: true },
@@ -328,7 +371,7 @@ inventoryRouter.post('/adjustments', requirePermission('inventory:write'), async
         amount,
       });
     }
-    return created;
+    return serializeMovement(created);
   });
-  res.status(201).json(serializeMovement(movement));
+  res.status(result.status).json(result.body);
 });
