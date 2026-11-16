@@ -59,6 +59,7 @@ describe('inventory movements', () => {
       .send({ productId, warehouseId, quantity: 100, unitCost: 2.5 });
     expect(res.status).toBe(201);
     expect(res.body.movementType).toBe('GOODS_RECEIPT');
+    expect(res.body.quantity).toBe(100);
     expect(await onHand(warehouseId)).toBe(before + 100);
   });
 
@@ -78,6 +79,8 @@ describe('inventory movements', () => {
       .set(auth(store))
       .send({ productId, warehouseId, quantity: 30 });
     expect(res.status).toBe(201);
+    expect(res.body.movementType).toBe('SALES_ISSUE');
+    expect(res.body.quantity).toBe(-30);
     expect(await onHand(warehouseId)).toBe(before - 30);
   });
 
@@ -94,6 +97,7 @@ describe('inventory movements', () => {
       .send({ productId, fromWarehouseId: warehouseId, toWarehouseId: dest, quantity: 20 });
     expect(res.status).toBe(201);
     expect(res.body.map((m: { movementType: string }) => m.movementType)).toEqual(['TRANSFER_OUT', 'TRANSFER_IN']);
+    expect(res.body.map((m: { quantity: number }) => m.quantity)).toEqual([-20, 20]);
     expect(await onHand(warehouseId)).toBe(beforeSrc - 20);
     expect(await onHand(dest)).toBe(beforeDest + 20);
   });
@@ -106,6 +110,7 @@ describe('inventory movements', () => {
       .send({ productId, warehouseId, quantityDelta: -5, reason: 'Damage write-off' });
     expect(res.status).toBe(201);
     expect(res.body.movementType).toBe('ADJUSTMENT');
+    expect(res.body.quantity).toBe(-5);
     expect(await onHand(warehouseId)).toBe(before - 5);
   });
 

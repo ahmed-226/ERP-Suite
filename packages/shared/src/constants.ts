@@ -25,6 +25,25 @@ export const MOVEMENT_TYPES = [
 ] as const;
 export type MovementType = (typeof MOVEMENT_TYPES)[number];
 
+/**
+ * Movement quantities are signed: positive brings stock in, negative takes it
+ * out. Directional movement types derive their sign from the type, so the API,
+ * mock store and seed data cannot drift; an ADJUSTMENT already carries the
+ * caller's signed delta.
+ */
+export function signedMovementQuantity(movementType: MovementType, quantity: number): number {
+  switch (movementType) {
+    case 'GOODS_RECEIPT':
+    case 'TRANSFER_IN':
+      return Math.abs(quantity);
+    case 'SALES_ISSUE':
+    case 'TRANSFER_OUT':
+      return -Math.abs(quantity);
+    case 'ADJUSTMENT':
+      return quantity;
+  }
+}
+
 export const PERMISSIONS = [
   'accounts:read',
   'accounts:write',

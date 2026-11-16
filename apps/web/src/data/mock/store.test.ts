@@ -251,6 +251,8 @@ describe('MockStore inventory invariants', () => {
       quantity: 4,
     });
     expect(issue.unitCost).toBe(15);
+    expect(issue.movementType).toBe('SALES_ISSUE');
+    expect(issue.quantity).toBe(-4);
 
     const adjustment = await store.adjust({
       productId: product.productId,
@@ -259,6 +261,7 @@ describe('MockStore inventory invariants', () => {
       reason: 'Damage',
     });
     expect(adjustment.unitCost).toBe(15);
+    expect(adjustment.quantity).toBe(-2);
 
     const [out, into] = await store.transfer({
       productId: product.productId,

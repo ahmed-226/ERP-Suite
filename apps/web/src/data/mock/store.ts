@@ -41,6 +41,7 @@ import {
   type Warehouse,
   type WarehouseFilter,
   REVERSAL_REFERENCE_TYPE,
+  signedMovementQuantity,
   SYSTEM_ACCOUNT_CODES,
 } from '@erp/shared';
 import { DataError } from '../errors';
@@ -955,7 +956,7 @@ export class MockStore {
       input.productId,
       input.warehouseId,
       'GOODS_RECEIPT',
-      input.quantity,
+      signedMovementQuantity('GOODS_RECEIPT', input.quantity),
       input.unitCost,
       input.referenceId ?? null,
     );
@@ -998,7 +999,7 @@ export class MockStore {
       input.productId,
       input.warehouseId,
       'SALES_ISSUE',
-      -input.quantity,
+      signedMovementQuantity('SALES_ISSUE', input.quantity),
       unitCost,
       input.referenceId ?? null,
     );
@@ -1045,7 +1046,7 @@ export class MockStore {
       input.productId,
       input.fromWarehouseId,
       'TRANSFER_OUT',
-      -input.quantity,
+      signedMovementQuantity('TRANSFER_OUT', input.quantity),
       unitCost,
       null,
     );
@@ -1053,7 +1054,7 @@ export class MockStore {
       input.productId,
       input.toWarehouseId,
       'TRANSFER_IN',
-      input.quantity,
+      signedMovementQuantity('TRANSFER_IN', input.quantity),
       unitCost,
       null,
     );
