@@ -79,7 +79,10 @@ model User {
   journals   JournalEntry[]    @relation("journal_created_by")
   movements  InventoryTransaction[] @relation("movement_created_by")
 
-  @@unique([companyId, email])
+  // Login resolves a user by email alone, so an address must identify exactly
+  // one account across all tenants. A case-insensitive CHECK keeps the unique
+  // index equivalent to a unique index on lower(email).
+  @@unique([email])
   @@index([companyId])
   @@map("users")
 }

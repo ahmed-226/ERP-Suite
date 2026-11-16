@@ -16,6 +16,13 @@ const REFRESH_KEY = (jti: string) => `refresh:${jti}`;
 const PERM_KEY = (userId: string) => `perm:${userId}`;
 const PERM_TTL = 60;
 
+/**
+ * A valid bcrypt hash that matches no password. Verifying it for unknown or
+ * inactive accounts keeps the failure path roughly as slow as a wrong password,
+ * so response timing does not reveal whether an email exists.
+ */
+const DUMMY_PASSWORD_HASH = '$2b$10$jE8k1ms9.7qdd4XmwYq/nOx97V3aG6zO5TDE6oYUMcyHGdva8740O';
+
 /** Users + role codes + permission codes in one query; also cached for RBAC. */
 export async function loadAuthUser(userId: string, companyId: string): Promise<AuthUser> {
   const user = await prisma.user.findFirst({
@@ -65,16 +72,19 @@ function issueTokens(user: { userId: string; companyId: string }): {
 }
 
 export async function login(email: string, password: string): Promise<LoginResponse> {
-  const user = await prisma.user.findFirst({
-    where: { email: { equals: email, mode: 'insensitive' } },
+  // Emails are stored lowercase and globally unique, so the address alone
+  // resolves one account in one tenant (no company selector in the login form).
+  const user = await prisma.user.findUnique({
+    where: { email: email.toLowerCase() },
     include: { company: { select: { name: true } } },
   });
-  // Same message for unknown email and wrong password (no user enumeration).
-  if (!user || !user.isActive) {
+  const passwordHash = user?.isActive ? user.passwordHash : DUMMY_PASSWORD_HASH;
+  const ok = await verifyPassword(password, passwordHash);
+  // Same message and comparable timing for unknown email and wrong password
+  // (no user enumeration).
+  if (!user || !user.isActive || !ok) {
     throw new ApiError(401, 'INVALID_CREDENTIALS', 'Invalid email or password');
   }
-  const ok = await verifyPassword(password, user.passwordHash);
-  if (!ok) throw new ApiError(401, 'INVALID_CREDENTIALS', 'Invalid email or password');
 
   const authUser = await loadAuthUser(user.userId, user.companyId);
   return { ...issueTokens(user), user: authUser };

@@ -46,6 +46,39 @@ describe('POST /auth/login', () => {
     expect(res.status).toBe(401);
     expect(res.body.error.code).toBe('INVALID_CREDENTIALS');
   });
+
+  it('resolves an email to exactly one account in one tenant, case-insensitively', async () => {
+    const res = await login({ email: 'ADMIN@ACME.TEST', password: 'Passw0rd!' });
+    expect(res.status).toBe(200);
+    expect(res.body.user.email).toBe('admin@acme.test');
+    expect(res.body.user.companyId).toBe('11111111-1111-1111-1111-111111111111');
+
+    const matches = await prisma.user.count({
+      where: { email: { equals: 'admin@acme.test', mode: 'insensitive' } },
+    });
+    expect(matches).toBe(1);
+  });
+
+  it('refuses a duplicate email in another company, including case variants', async () => {
+    const other = await prisma.company.create({ data: { name: 'Other Tenant' } });
+    try {
+      const shadow = {
+        companyId: other.companyId,
+        passwordHash: 'not-a-real-hash',
+        fullName: 'Shadow Admin',
+      };
+      // The address already exists in Acme; it must not exist in a second tenant.
+      await expect(
+        prisma.user.create({ data: { ...shadow, email: 'admin@acme.test' } }),
+      ).rejects.toThrow();
+      // Case variants cannot slip past the uniqueness rule either.
+      await expect(
+        prisma.user.create({ data: { ...shadow, email: 'ADMIN@acme.test' } }),
+      ).rejects.toThrow();
+    } finally {
+      await prisma.company.delete({ where: { companyId: other.companyId } });
+    }
+  });
 });
 
 describe('POST /auth/refresh + /auth/logout', () => {
