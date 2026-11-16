@@ -72,38 +72,78 @@ export class ApiInsufficientStock extends ApiError {
 }
 
 /**
- * Applies one stock delta under a row lock (FOR UPDATE), creating the stock
- * row on first movement. `quantityDelta` may be negative; negative results
- * are rejected (also guarded by a DB CHECK).
+ * Serializes stock writes for each (product, warehouse) bucket with
+ * transaction-scoped advisory locks. A row lock cannot guard the first
+ * movement: the stock row does not exist yet, so `FOR UPDATE` locks nothing
+ * and concurrent inserts race on the unique key. Locks are taken in sorted
+ * key order so that a transfer and its reverse cannot deadlock.
  */
-export async function applyStockDelta(
+async function lockStockBuckets(
   tx: PrismaTx,
-  args: { companyId: string; productId: string; warehouseId: string; quantityDelta: number },
+  productId: string,
+  warehouseIds: readonly string[],
 ): Promise<void> {
-  await tx.$executeRaw`SELECT quantity_on_hand FROM inventory_stock
-    WHERE product_id::text = ${args.productId} AND warehouse_id::text = ${args.warehouseId}
-    FOR UPDATE`;
-
-  const existing = await tx.inventoryStock.findFirst({
-    where: { productId: args.productId, warehouseId: args.warehouseId },
-  });
-  const next = (existing?.quantityOnHand ?? 0) + args.quantityDelta;
-  if (next < 0) {
-    throw new ApiInsufficientStock(existing?.quantityOnHand ?? 0, Math.abs(args.quantityDelta));
+  const keys = [...new Set(warehouseIds)]
+    .sort()
+    .map((warehouseId) => `inventory_stock:${productId}:${warehouseId}`);
+  for (const key of keys) {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`;
   }
-  if (existing) {
-    await tx.inventoryStock.update({
-      where: { stockId: existing.stockId },
-      data: { quantityOnHand: next },
+}
+
+/**
+ * Serializes the read-blend-write of the company-wide moving average. Without
+ * it two receipts both read the same average and the last write wins, silently
+ * dropping the other receipt's cost. The product row always exists, so a plain
+ * row lock is enough.
+ */
+export async function lockProductCosting(tx: PrismaTx, productId: string): Promise<void> {
+  await tx.$executeRaw`SELECT product_id FROM products
+    WHERE product_id = ${productId}::uuid
+    FOR UPDATE`;
+}
+
+/**
+ * Applies stock deltas, creating missing stock rows on first movement. Every
+ * delta is validated before any row is written. Deltas may be negative;
+ * negative results are rejected (also guarded by a DB CHECK).
+ */
+export async function applyStockDeltas(
+  tx: PrismaTx,
+  args: {
+    companyId: string;
+    productId: string;
+    deltas: ReadonlyArray<{ warehouseId: string; quantityDelta: number }>;
+  },
+): Promise<void> {
+  await lockStockBuckets(
+    tx,
+    args.productId,
+    args.deltas.map((delta) => delta.warehouseId),
+  );
+
+  for (const delta of args.deltas) {
+    const existing = await tx.inventoryStock.findFirst({
+      where: { productId: args.productId, warehouseId: delta.warehouseId },
     });
-  } else {
-    await tx.inventoryStock.create({
-      data: {
-        companyId: args.companyId,
-        productId: args.productId,
-        warehouseId: args.warehouseId,
-        quantityOnHand: next,
-      },
-    });
+    const next = (existing?.quantityOnHand ?? 0) + delta.quantityDelta;
+    if (next < 0) {
+      throw new ApiInsufficientStock(existing?.quantityOnHand ?? 0, Math.abs(delta.quantityDelta));
+    }
+    if (existing) {
+      await tx.inventoryStock.update({
+        where: { stockId: existing.stockId },
+        data: { quantityOnHand: next },
+      });
+    } else {
+      await tx.inventoryStock.create({
+        data: {
+          companyId: args.companyId,
+          productId: args.productId,
+          warehouseId: delta.warehouseId,
+          quantityOnHand: next,
+        },
+      });
+    }
   }
 }

@@ -13,7 +13,8 @@ import { prisma } from '../../db/db';
 import { notFound } from '../../lib/errors';
 import { requireAuth, requirePermission } from '../../middleware/auth';
 import {
-  applyStockDelta,
+  applyStockDeltas,
+  lockProductCosting,
   movementInclude,
   serializeMovement,
   stockInclude,
@@ -131,7 +132,9 @@ inventoryRouter.post('/receipts', requirePermission('inventory:write'), async (r
 
   const movement = await prisma.$transaction(async (tx) => {
     // Moving average is company-wide: blend the received cost into the value of
-    // all on-hand units before the stock delta lands.
+    // all on-hand units before the stock delta lands. Locking the product first
+    // keeps concurrent receipts from overwriting each other's blend.
+    await lockProductCosting(tx, input.productId);
     const product = await tx.product.findUniqueOrThrow({
       where: { productId: input.productId },
       select: { averageCost: true },
@@ -150,11 +153,10 @@ inventoryRouter.post('/receipts', requirePermission('inventory:write'), async (r
       data: { averageCost: newAverage },
     });
 
-    await applyStockDelta(tx, {
+    await applyStockDeltas(tx, {
       companyId,
       productId: input.productId,
-      warehouseId: input.warehouseId,
-      quantityDelta: input.quantity,
+      deltas: [{ warehouseId: input.warehouseId, quantityDelta: input.quantity }],
     });
     const created = await recordMovement(tx, {
       companyId,
@@ -199,11 +201,10 @@ inventoryRouter.post('/issues', requirePermission('inventory:write'), async (req
       select: { averageCost: true },
     });
     const unitCost = Number(product.averageCost);
-    await applyStockDelta(tx, {
+    await applyStockDeltas(tx, {
       companyId,
       productId: input.productId,
-      warehouseId: input.warehouseId,
-      quantityDelta: -input.quantity,
+      deltas: [{ warehouseId: input.warehouseId, quantityDelta: -input.quantity }],
     });
     const created = await recordMovement(tx, {
       companyId,
@@ -249,17 +250,13 @@ inventoryRouter.post('/transfers', requirePermission('inventory:write'), async (
       select: { averageCost: true },
     });
     const unitCost = Number(product.averageCost);
-    await applyStockDelta(tx, {
+    await applyStockDeltas(tx, {
       companyId,
       productId: input.productId,
-      warehouseId: input.fromWarehouseId,
-      quantityDelta: -input.quantity,
-    });
-    await applyStockDelta(tx, {
-      companyId,
-      productId: input.productId,
-      warehouseId: input.toWarehouseId,
-      quantityDelta: input.quantity,
+      deltas: [
+        { warehouseId: input.fromWarehouseId, quantityDelta: -input.quantity },
+        { warehouseId: input.toWarehouseId, quantityDelta: input.quantity },
+      ],
     });
     const out = await recordMovement(tx, {
       companyId,
@@ -299,11 +296,10 @@ inventoryRouter.post('/adjustments', requirePermission('inventory:write'), async
       select: { averageCost: true },
     });
     const unitCost = Number(product.averageCost);
-    await applyStockDelta(tx, {
+    await applyStockDeltas(tx, {
       companyId,
       productId: input.productId,
-      warehouseId: input.warehouseId,
-      quantityDelta: input.quantityDelta,
+      deltas: [{ warehouseId: input.warehouseId, quantityDelta: input.quantityDelta }],
     });
     const created = await recordMovement(tx, {
       companyId,

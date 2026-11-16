@@ -40,14 +40,18 @@ afterAll(async () => {
 const auth = (token: string) => ({ authorization: `Bearer ${token}` });
 
 /** Current on-hand for (product, warehouse); 0 when no stock row exists yet. */
-async function onHand(warehouseId: string): Promise<number> {
+async function onHandFor(product: string, warehouse: string): Promise<number> {
   const stock = await request(app)
     .get('/api/v1/inventory/stock')
-    .query({ productId })
+    .query({ productId: product })
     .set(auth(store));
   return Number(
-    stock.body.find((s: { warehouseId: string }) => s.warehouseId === warehouseId)?.quantityOnHand ?? 0,
+    stock.body.find((s: { warehouseId: string }) => s.warehouseId === warehouse)?.quantityOnHand ?? 0,
   );
+}
+
+async function onHand(warehouseId: string): Promise<number> {
+  return onHandFor(productId, warehouseId);
 }
 
 describe('inventory movements', () => {
@@ -242,5 +246,95 @@ describe('weighted-average inventory valuation', () => {
 
     expect(cogsAfter.debit - (cogsBefore?.debit ?? 0)).toBeCloseTo(8 * 7.25, 4);
     expect(inventoryAfter.net - (inventoryBefore?.net ?? 0)).toBeCloseTo(20 * 7.25 - 8 * 7.25, 4);
+  });
+});
+
+describe('stock concurrency', () => {
+  let secondWarehouseId = '';
+
+  beforeAll(async () => {
+    const warehouses = await request(app).get('/api/v1/warehouses').set(auth(admin));
+    secondWarehouseId = warehouses.body[1].warehouseId;
+  });
+
+  async function createProduct(label: string): Promise<string> {
+    const sku = `TEST-RACE-${label}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const res = await request(app)
+      .post('/api/v1/products')
+      .set(auth(admin))
+      .send({ sku, name: `Race ${label}` });
+    expect(res.status).toBe(201);
+    return res.body.productId as string;
+  }
+
+  function receipt(product: string, warehouse: string, quantity: number, unitCost: number) {
+    return request(app)
+      .post('/api/v1/inventory/receipts')
+      .set(auth(store))
+      .send({ productId: product, warehouseId: warehouse, quantity, unitCost });
+  }
+
+  it('serializes parallel first receipts without losing stock or cost', async () => {
+    const product = await createProduct('RECEIPT');
+    const costs = [1, 2, 3, 4, 5, 6, 7, 8];
+
+    const responses = await Promise.all(costs.map((cost) => receipt(product, warehouseId, 5, cost)));
+
+    expect(responses.map((r) => r.status)).toEqual(costs.map(() => 201));
+    expect(await onHandFor(product, warehouseId)).toBe(40);
+    // 8 receipts × 5 units at costs 1..8 blend to a weighted average of 4.5.
+    const saved = await request(app).get(`/api/v1/products/${product}`).set(auth(admin));
+    expect(saved.body.averageCost).toBe(4.5);
+  });
+
+  it('serializes parallel issues without losing stock', async () => {
+    const product = await createProduct('ISSUE');
+    expect((await receipt(product, warehouseId, 40, 3)).status).toBe(201);
+
+    const responses = await Promise.all(
+      Array.from({ length: 8 }, () =>
+        request(app)
+          .post('/api/v1/inventory/issues')
+          .set(auth(store))
+          .send({ productId: product, warehouseId, quantity: 5 }),
+      ),
+    );
+
+    expect(responses.map((r) => r.status)).toEqual(Array(8).fill(201));
+    expect(await onHandFor(product, warehouseId)).toBe(0);
+  });
+
+  it('does not deadlock when transfers cross in opposite directions', async () => {
+    const product = await createProduct('TRANSFER');
+    expect((await receipt(product, warehouseId, 50, 2)).status).toBe(201);
+    expect((await receipt(product, secondWarehouseId, 50, 2)).status).toBe(201);
+
+    for (let round = 0; round < 5; round += 1) {
+      const responses = await Promise.all([
+        request(app)
+          .post('/api/v1/inventory/transfers')
+          .set(auth(store))
+          .send({
+            productId: product,
+            fromWarehouseId: warehouseId,
+            toWarehouseId: secondWarehouseId,
+            quantity: 1,
+          }),
+        request(app)
+          .post('/api/v1/inventory/transfers')
+          .set(auth(store))
+          .send({
+            productId: product,
+            fromWarehouseId: secondWarehouseId,
+            toWarehouseId: warehouseId,
+            quantity: 1,
+          }),
+      ]);
+      expect(responses.map((r) => r.status)).toEqual([201, 201]);
+    }
+
+    // Each round moves one unit each way, so both buckets end unchanged.
+    expect(await onHandFor(product, warehouseId)).toBe(50);
+    expect(await onHandFor(product, secondWarehouseId)).toBe(50);
   });
 });
