@@ -74,6 +74,15 @@ warehouseRouter.patch('/:warehouseId', requirePermission('warehouses:write'), as
     where: { warehouseId, companyId: req.user!.companyId },
   });
   if (!existing) throw notFound('Warehouse');
+  if (input.code && input.code !== existing.code) {
+    const duplicate = await prisma.warehouse.findFirst({
+      where: { companyId: req.user!.companyId, code: input.code },
+      select: { warehouseId: true },
+    });
+    if (duplicate) {
+      throw new ApiError(409, 'DUPLICATE', `Warehouse code ${input.code} already exists`);
+    }
+  }
   const warehouse = await prisma.warehouse.update({ where: { warehouseId }, data: input });
   res.status(200).json(serialize(warehouse));
 });

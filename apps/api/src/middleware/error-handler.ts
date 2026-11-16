@@ -26,6 +26,18 @@ export function errorHandler(
     code = 'VALIDATION_ERROR';
     message = 'Request validation failed';
     details = err.flatten();
+  } else if (isPrismaKnownRequestError(err)) {
+    if (err.code === 'P2002') {
+      status = 409;
+      code = 'CONFLICT';
+      message = 'A record with the same unique value already exists';
+      details = { target: err.meta?.target };
+    } else if (err.code === 'P2003') {
+      status = 422;
+      code = 'FOREIGN_KEY_VIOLATION';
+      message = 'The request references a related record that does not exist or is in use';
+      details = { field: err.meta?.field_name ?? err.meta?.field };
+    }
   } else if (typeof err === 'object' && err !== null && 'type' in err) {
     // express.json() body-parser failures
     if ((err as { type?: string }).type === 'entity.parse.failed') {
@@ -40,4 +52,16 @@ export function errorHandler(
   }
 
   res.status(status).json({ error: { code, message, ...(details ? { details } : {}) } });
+}
+
+function isPrismaKnownRequestError(
+  err: unknown,
+): err is { code: string; meta?: Record<string, unknown> } {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    typeof (err as { code?: unknown }).code === 'string' &&
+    /^P\d{4}$/.test((err as { code: string }).code)
+  );
 }

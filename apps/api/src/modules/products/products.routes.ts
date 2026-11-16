@@ -79,6 +79,13 @@ productRouter.patch('/:productId', requirePermission('products:write'), async (r
     where: { productId, companyId: req.user!.companyId },
   });
   if (!existing) throw notFound('Product');
+  if (input.sku && input.sku !== existing.sku) {
+    const duplicate = await prisma.product.findFirst({
+      where: { companyId: req.user!.companyId, sku: input.sku },
+      select: { productId: true },
+    });
+    if (duplicate) throw new ApiError(409, 'DUPLICATE', `SKU ${input.sku} already exists`);
+  }
   const product = await prisma.product.update({ where: { productId }, data: input });
   res.status(200).json(serialize(product));
 });

@@ -78,6 +78,15 @@ accountRouter.patch('/:accountId', requirePermission('accounts:write'), async (r
     await assertAccountInCompany(req.user!.companyId, input.parentAccountId);
     await assertNoCycle(req.user!.companyId, accountId, input.parentAccountId);
   }
+  if (input.accountCode !== undefined && input.accountCode !== account.accountCode) {
+    const duplicate = await prisma.chartOfAccount.findFirst({
+      where: { companyId: req.user!.companyId, accountCode: input.accountCode },
+      select: { accountId: true },
+    });
+    if (duplicate) {
+      throw new ApiError(409, 'DUPLICATE', `Account code ${input.accountCode} already exists`);
+    }
+  }
   if (input.accountType !== undefined && input.accountType !== account.accountType) {
     const lines = await prisma.journalEntryLine.count({ where: { accountId } });
     if (lines > 0) {
