@@ -16,18 +16,23 @@ erDiagram
     COMPANY ||--o{ WAREHOUSE : "scopes"
     COMPANY ||--o{ JOURNAL_ENTRY : "scopes"
     COMPANY ||--o{ STOCKTAKE : "scopes"
+    COMPANY ||--o{ FISCAL_YEAR : "scopes"
+    COMPANY ||--o{ FISCAL_PERIOD : "scopes"
+    COMPANY ||--o{ FISCAL_EVENT : "scopes"
 
     USER }o--|| ROLE : "assigned role"
     USER ||--o{ JOURNAL_ENTRY : "created by"
     USER ||--o{ INVENTORY_TRANSACTION : "recorded by"
     USER ||--o{ STOCKTAKE : "creates"
     USER |o--o{ STOCKTAKE : "applies"
+    USER ||--o{ FISCAL_EVENT : "performs"
 
     ACCOUNT |o--o{ ACCOUNT : "parent of"
 
     JOURNAL_ENTRY ||--|{ JOURNAL_ENTRY_LINE : "contains"
     JOURNAL_ENTRY_LINE }o--|| ACCOUNT : "posts to"
     JOURNAL_ENTRY }o--o| INVENTORY_TRANSACTION : "auto-generated for"
+    JOURNAL_ENTRY |o--o| FISCAL_YEAR : "closing entry"
 
     PRODUCT ||--o{ INVENTORY_STOCK : "stocked as"
     WAREHOUSE ||--o{ INVENTORY_STOCK : "holds"
@@ -37,6 +42,10 @@ erDiagram
     WAREHOUSE ||--o{ STOCKTAKE : "counted in"
     STOCKTAKE ||--|{ STOCKTAKE_LINE : "contains"
     PRODUCT ||--o{ STOCKTAKE_LINE : "counted as"
+
+    FISCAL_YEAR ||--|{ FISCAL_PERIOD : "contains"
+    FISCAL_YEAR ||--o{ FISCAL_EVENT : "logged for"
+    FISCAL_PERIOD ||--o{ FISCAL_EVENT : "logged for"
 
     COMPANY {
         string companyId PK
@@ -106,8 +115,8 @@ erDiagram
         string entryNumber UK "JE-0001 style counter"
         date entryDate
         string status "DRAFT | POSTED | VOIDED"
-        string referenceType "MANUAL | INVENTORY_RECEIPT | SALES_ISSUE | ADJUSTMENT | REVERSAL"
-        string referenceId FK "movement id, or reversed entry id for REVERSAL"
+        string referenceType "MANUAL | INVENTORY_RECEIPT | SALES_ISSUE | ADJUSTMENT | REVERSAL | YEAR_END_CLOSE"
+        string referenceId FK "movement/reversed entry/fiscal year id as applicable"
         string createdBy FK
         string postedAt
     }
@@ -138,6 +147,39 @@ erDiagram
         int countedQuantity
         int variance "counted - system"
     }
+    FISCAL_YEAR {
+        string fiscalYearId PK
+        string companyId FK
+        string name
+        date startDate
+        date endDate
+        string status "OPEN | CLOSED"
+        string closedBy FK
+        datetime closedAt
+        string closingEntryId FK
+    }
+    FISCAL_PERIOD {
+        string periodId PK
+        string fiscalYearId FK
+        string companyId FK
+        string name
+        int periodNumber
+        date startDate
+        date endDate
+        string status "OPEN | CLOSED"
+        string closedBy FK
+        datetime closedAt
+    }
+    FISCAL_EVENT {
+        string eventId PK
+        string companyId FK
+        string fiscalYearId FK
+        string periodId FK
+        string action "CLOSE_PERIOD | REOPEN_PERIOD | CLOSE_YEAR | YEAR_END_CLOSE"
+        string reason
+        string actorUserId FK
+        datetime createdAt
+    }
 ```
 
 ## Entities
@@ -152,16 +194,19 @@ erDiagram
 | `WAREHOUSE` | `warehouses` state | Stock-keeping location. | Unique code; cannot be deleted while holding stock or having movement history (`WAREHOUSE_IN_USE`). |
 | `INVENTORY_STOCK` | `stock` rows | Per-(product, warehouse) quantity bucket. Created lazily on first movement. | `quantityOnHand` can never go negative (DB CHECK mirrored in code). |
 | `INVENTORY_TRANSACTION` | `movements` list | Append-only movement ledger. Signed quantity: positive = in, negative = out. | Rows are never updated or deleted — new facts are new rows. |
-| `JOURNAL_ENTRY` | `journals` list | Double-entry document with a draft → posted lifecycle; posted entries are reversed, never rewritten. | ≥ 2 lines with positive amounts; `POSTED` requires Σ debits = Σ credits; posted entries are immutable; voiding one posts a linked `REVERSAL` entry. |
+| `JOURNAL_ENTRY` | `journals` list | Double-entry document with a draft → posted lifecycle; posted entries are reversed, never rewritten. | ≥ 2 lines with positive amounts; `POSTED` requires Σ debits = Σ credits; posted entries are immutable; voiding one posts a linked `REVERSAL` entry. Posting/editing is blocked in closed fiscal periods. |
 | `JOURNAL_ENTRY_LINE` | entry lines | One debit or credit against an account. | Amount always positive; side is `DEBIT` or `CREDIT`. |
 | `STOCKTAKE` | `stocktakes` state | Warehouse count sheet (cycle/physical count) with a draft → applied lifecycle. | Draft captures system quantities, counted quantities and variances per product; only `DRAFT` can be applied. Applying posts `ADJUSTMENT` movements and balanced GL entries for non-zero variances (auditable, no direct ledger edits) and records `appliedBy`/`appliedAt`. |
 | `STOCKTAKE_LINE` | stocktake lines | One counted product line within a stocktake. | Holds captured `systemQuantity`, `countedQuantity` and `variance` (`counted - system`); one line per (stocktake, product). |
+| `FISCAL_YEAR` | `fiscal_years` | Fiscal year with open/closed status and optional closing entry. | Contains periods; year-end close transfers revenue/expense to retained earnings and can post a closing journal entry. |
+| `FISCAL_PERIOD` | `fiscal_periods` | Date-bounded accounting period within a fiscal year. | Open/closed status controls posting by date; reopening is audited. |
+| `FISCAL_EVENT` | `fiscal_events` | Immutable audit trail for fiscal actions. | Records close/reopen/year-end actions with actor, reason and timestamp. |
 
 ## Relationships
 
 | From | To | Cardinality | Meaning |
 | --- | --- | --- | --- |
-| `COMPANY` | `USER` / `ROLE` / `ACCOUNT` / `PRODUCT` / `WAREHOUSE` / `JOURNAL_ENTRY` / `STOCKTAKE` | 1 : N | Tenant scoping — every record belongs to one company. |
+| `COMPANY` | `USER` / `ROLE` / `ACCOUNT` / `PRODUCT` / `WAREHOUSE` / `JOURNAL_ENTRY` / `STOCKTAKE` / `FISCAL_YEAR` / `FISCAL_PERIOD` / `FISCAL_EVENT` | 1 : N | Tenant scoping — every record belongs to one company. |
 | `USER` | `ROLE` | N : 1 | Each user has exactly one role in v1 (assignable in Settings). |
 | `USER` | `JOURNAL_ENTRY`, `INVENTORY_TRANSACTION`, `STOCKTAKE` | 1 : N | Audit: who created/recorded the record (`createdBy` + display name) and, for stocktakes, who applied it. |
 | `ACCOUNT` | `ACCOUNT` | 0..1 parent : N children | Chart-of-accounts hierarchy. |
@@ -173,6 +218,10 @@ erDiagram
 | `WAREHOUSE` | `STOCKTAKE` | 1 : N | Each stocktake counts one warehouse. |
 | `STOCKTAKE` | `STOCKTAKE_LINE` | 1 : 1..N | A stocktake records one or more counted product lines. |
 | `PRODUCT` | `STOCKTAKE_LINE` | 1 : N | Each line captures the count for one product. |
+| `FISCAL_YEAR` | `FISCAL_PERIOD` | 1 : N | A fiscal year contains ordered periods. |
+| `FISCAL_YEAR` / `FISCAL_PERIOD` | `FISCAL_EVENT` | 1 : N | Close/reopen/year-end actions are recorded in the audit trail. |
+| `USER` | `FISCAL_EVENT` | 1 : N | Audit of who performed fiscal actions. |
+| `FISCAL_YEAR` | `JOURNAL_ENTRY` | 0..1 : 1 | Year-end close may create a closing entry (`YEAR_END_CLOSE`). |
 
 ## Integration account mapping
 

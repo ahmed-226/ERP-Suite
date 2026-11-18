@@ -1,6 +1,8 @@
 import type {
   Account,
   AccountFilter,
+  AccountLedgerFilter,
+  AccountLedgerReport,
   AdjustmentInput,
   AdminUser,
   AssignRoleInput,
@@ -108,6 +110,7 @@ export interface InventoryApi {
 
 export interface ReportsApi {
   trialBalance(filter: TrialBalanceFilter): Promise<TrialBalanceRow[]>;
+  accountLedger(accountId: string, filter: AccountLedgerFilter): Promise<AccountLedgerReport>;
   inventoryValuation(): Promise<InventoryValuationReport>;
   inventoryMovementSummary(
     filter: InventoryMovementSummaryFilter,

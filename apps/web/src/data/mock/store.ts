@@ -7,6 +7,8 @@ import {
   sumMoney,
   type Account,
   type AccountFilter,
+  type AccountLedgerFilter,
+  type AccountLedgerReport,
   type AdjustmentInput,
   type AuthUser,
   type CreateAccountInput,
@@ -1650,6 +1652,82 @@ export class MockStore {
         net: moneyToNumber(r.debit.minus(r.credit)),
       }))
       .sort((a, b) => a.accountCode.localeCompare(b.accountCode));
+  }
+
+  async accountLedger(accountId: string, filter: AccountLedgerFilter): Promise<AccountLedgerReport> {
+    await this.wait();
+    const account = this.accountById(accountId);
+    const items: Array<{
+      lineId: string;
+      entryId: string;
+      entryNumber: string;
+      entryDate: string;
+      referenceType: string | null;
+      referenceId: string | null;
+      description: string | null;
+      entryType: 'DEBIT' | 'CREDIT';
+      amount: number;
+      sortKey: string;
+    }> = [];
+
+    for (const entry of this.journals) {
+      if (entry.status !== 'POSTED') continue;
+      if (entry.entryDate > filter.to) continue;
+      for (const line of entry.lines) {
+        if (line.accountId !== accountId) continue;
+        items.push({
+          lineId: line.lineId,
+          entryId: entry.entryId,
+          entryNumber: entry.entryNumber,
+          entryDate: entry.entryDate,
+          referenceType: entry.referenceType ?? null,
+          referenceId: entry.referenceId ?? null,
+          description: line.description ?? null,
+          entryType: line.entryType,
+          amount: line.amount,
+          sortKey: `${entry.entryDate}|${entry.entryNumber}|${line.lineId}`,
+        });
+      }
+    }
+    items.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+
+    let opening = new Decimal(0);
+    let running = new Decimal(0);
+    const periodLines: AccountLedgerReport['lines'] = [];
+    for (const item of items) {
+      const delta = item.entryType === 'DEBIT' ? money(item.amount) : money(item.amount).negated();
+      if (item.entryDate < filter.from) {
+        opening = opening.plus(delta);
+        running = running.plus(delta);
+        continue;
+      }
+      running = running.plus(delta);
+      periodLines.push({
+        lineId: item.lineId,
+        entryId: item.entryId,
+        entryNumber: item.entryNumber,
+        entryDate: item.entryDate,
+        referenceType: item.referenceType,
+        referenceId: item.referenceId,
+        description: item.description,
+        entryType: item.entryType,
+        debit: item.entryType === 'DEBIT' ? item.amount : 0,
+        credit: item.entryType === 'CREDIT' ? item.amount : 0,
+        runningBalance: moneyToNumber(running),
+      });
+    }
+
+    return {
+      accountId: account.accountId,
+      accountCode: account.accountCode,
+      accountName: account.accountName,
+      accountType: account.accountType,
+      from: filter.from,
+      to: filter.to,
+      openingBalance: moneyToNumber(opening),
+      closingBalance: moneyToNumber(running),
+      lines: periodLines,
+    };
   }
 
   private inventoryAccountBalance(): number {

@@ -3,6 +3,7 @@ import { Alert, Button, Card, DatePicker, Space, Table, Tag, Typography } from '
 import type { ColumnsType } from 'antd/es/table';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import dayjs, { type Dayjs } from 'dayjs';
 import type { TrialBalanceRow } from '@erp/shared';
 import { PageHeader } from '@/components/PageHeader';
@@ -29,8 +30,17 @@ export default function TrialBalancePage() {
   const rounded = (n: number) => Math.round(n * 10000) / 10000;
 
   const columns: ColumnsType<TrialBalanceRow> = [
-    { title: 'Code', dataIndex: 'accountCode', width: 110 },
-    { title: 'Account', dataIndex: 'accountName' },
+    {
+      title: 'Code',
+      dataIndex: 'accountCode',
+      width: 110,
+      render: (value: string, row) => <Link to={`/accounting/ledger/${row.accountId}`}>{value}</Link>,
+    },
+    {
+      title: 'Account',
+      dataIndex: 'accountName',
+      render: (value: string, row) => <Link to={`/accounting/ledger/${row.accountId}`}>{value}</Link>,
+    },
     {
       title: 'Type',
       dataIndex: 'accountType',

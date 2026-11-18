@@ -225,9 +225,17 @@ flowchart TD
     D --> E["Role + permission set updated<br/>(menus re-filter on next sign-in)"]
 ```
 
+## 11a. Fiscal periods and year-end close
+
+- **Fiscal calendar** — define fiscal years and periods with open/closed status (`/accounting/fiscal-periods`, `GET/POST /fiscal/years`, `POST /fiscal/years/:id/periods`).
+- **Period lock** — journal create/edit/post/void and inventory operations that post value-dated effects are blocked when the relevant date falls in a closed period (`422 PERIOD_LOCKED`). Posting into a locked period is rejected; reports read posted data and remain consistent with period controls.
+- **Reopen with audit** — closed periods can be reopened while the fiscal year is open (`POST /fiscal/periods/:id/reopen`), recording a reason in the fiscal audit trail (`GET /fiscal/events`).
+- **Year-end close** — after all periods in a fiscal year are closed, year-end close (`POST /fiscal/years/:id/year-end-close`) posts a balanced closing entry (`referenceType YEAR_END_CLOSE`) that transfers revenue and expense balances to retained earnings (`3100`) and marks the year closed. The closing entry is a controlled final posting for that fiscal year.
+
 ## 12. Reports
 
-- **Trial balance** — aggregates lines of `POSTED` entries in a date range, grouped by account; the net column sums to zero across all accounts; exportable as CSV.
+- **Trial balance** — aggregates lines of `POSTED` entries in a date range, grouped by account; the net column sums to zero across all accounts; exportable as CSV. Each account drills into the account ledger.
+- **Account ledger / general ledger detail** — per-account posted lines for a date range with opening balance, running balance, and closing balance (`GET /reports/account-ledger/:accountId`). From a ledger line you can open the journal and follow its source document reference (e.g. reversal, inventory movement, fiscal close) in ≤ 3 clicks from the trial balance.
 - **Inventory valuation** — per-(product, warehouse) on-hand value at running `averageCost`, reconciled to the posted `1200` Inventory account balance (`difference`).
 - **Inventory movement summary** — movement counts and in/out/value totals by month and movement type for a selected date range.
 - **Inventory aging / slow-moving** — on-hand stock with last movement time and days since last movement as of a reference date.
@@ -245,3 +253,4 @@ flowchart TD
 | 6 | Account codes, SKUs and warehouse codes are unique | `DUPLICATE_CODE` / `DUPLICATE_SKU` |
 | 7 | Referential guards: accounts with children/lines, products with stock/history, warehouses with stock/history cannot be deleted | `ACCOUNT_IN_USE` / `PRODUCT_IN_USE` / `WAREHOUSE_IN_USE` |
 | 8 | Every mutation requires a signed-in user | `UNAUTHENTICATED` |
+| 9 | Posting and value-dated inventory operations are blocked in closed fiscal periods | `PERIOD_LOCKED` |

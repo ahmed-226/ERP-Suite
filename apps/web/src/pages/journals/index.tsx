@@ -96,7 +96,12 @@ export default function JournalsPage() {
   ];
 
   const columns: ColumnsType<JournalEntry> = [
-    { title: 'Number', dataIndex: 'entryNumber', width: 110 },
+    {
+      title: 'Number',
+      dataIndex: 'entryNumber',
+      width: 110,
+      render: (value: string, entry) => <Link to={`/accounting/journals/${entry.entryId}`}>{value}</Link>,
+    },
     { title: 'Date', dataIndex: 'entryDate', width: 110 },
     {
       title: 'Status',

@@ -21,7 +21,7 @@ flowchart TD
 flowchart TD
     subgraph UI["Feature pages — src/pages/"]
         P1["Dashboard"]
-        P2["Accounting: accounts, journals, editor, trial balance"]
+        P2["Accounting: accounts, journals, editor/detail, trial balance, ledger, fiscal periods"]
         P3["Inventory: products, warehouses, stock, movements, operations, reports/valuation, stocktakes"]
         P4["Auth: login page"]
         P5["Settings: users & roles"]
@@ -35,7 +35,7 @@ flowchart TD
 
     subgraph Data["Data layer — src/data/"]
         DC["client.ts<br/>picks implementation from VITE_DATA_SOURCE"]
-        IF["DataSource interface<br/>(auth, accounts, journals, products,<br/>warehouses, inventory, reports, users)"]
+        IF["DataSource interface<br/>(auth, accounts, journals, products,<br/>warehouses, inventory, reports, fiscal, users)"]
         MS["MockStore<br/>in-memory, invariant-enforcing"]
         HS["http/ stub — throws until Stage C"]
     end
@@ -103,7 +103,7 @@ sequenceDiagram
 flowchart LR
     ROOT["/"] -->|"RequireAuth wraps everything below"| LOGIN["/login (public)"]
     ROOT --> DASH["/dashboard"]
-    ROOT --> ACC["/accounting<br/>accounts · journals · journals/new · journals/:id/edit · trial-balance"]
+    ROOT --> ACC["/accounting<br/>accounts · journals · journals/new · journals/:id · journals/:id/edit · trial-balance · ledger/:accountId · fiscal-periods"]
     ROOT --> INV["/inventory<br/>products · warehouses · stock · movements · operations · valuation · stocktakes"]
     ROOT --> SET["/settings/access"]
     ROOT --> NF["* → 404 placeholder"]
@@ -129,6 +129,6 @@ flowchart LR
 | `src/data/client.ts` | Chooses the implementation from `VITE_DATA_SOURCE`. |
 | `src/data/mock/` | `MockStore`: seeded in-memory state + all domain invariants. |
 | `src/data/http/` | Stub; implemented in Stage C with axios + refresh interceptor. |
-| `src/pages/` | One folder per feature (accounts, journals, trialBalance, products, warehouses, stock, movements, operations, inventoryValuation, stocktakes, settings). |
+| `src/pages/` | One folder per feature (accounts, journals, ledger, fiscal, trialBalance, products, warehouses, stock, movements, operations, inventoryValuation, stocktakes, settings). |
 | `src/lib/` | Query client, money/date formatters, journal totals math, CSV download. |
 | `src/components/` | `PageHeader`, `ErrorBoundary`. |

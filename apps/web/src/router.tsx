@@ -9,7 +9,9 @@ import ProductsPage from '@/pages/products';
 import WarehousesPage from '@/pages/warehouses';
 import JournalsPage from '@/pages/journals';
 import JournalEditorPage from '@/pages/journals/JournalEditorPage';
+import JournalDetailPage from '@/pages/journals/JournalDetailPage';
 import TrialBalancePage from '@/pages/trialBalance';
+import AccountLedgerPage from '@/pages/ledger';
 import InventoryValuationPage from '@/pages/inventoryValuation';
 import StockPage from '@/pages/stock';
 import MovementsPage from '@/pages/movements';
@@ -44,12 +46,20 @@ export const router = createBrowserRouter([
         element: <JournalEditorPage />,
       },
       {
+        path: 'accounting/journals/:entryId',
+        element: <JournalDetailPage />,
+      },
+      {
         path: 'accounting/journals/:entryId/edit',
         element: <JournalEditorPage />,
       },
       {
         path: 'accounting/trial-balance',
         element: <TrialBalancePage />,
+      },
+      {
+        path: 'accounting/ledger/:accountId',
+        element: <AccountLedgerPage />,
       },
       {
         path: 'accounting/fiscal-periods',

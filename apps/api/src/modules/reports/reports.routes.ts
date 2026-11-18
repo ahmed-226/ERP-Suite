@@ -2,6 +2,7 @@ import { Router } from 'express';
 import {
   Decimal,
   SYSTEM_ACCOUNT_CODES,
+  accountLedgerFilterSchema,
   inventoryAgingFilterSchema,
   inventoryMovementSummaryFilterSchema,
   money,
@@ -10,6 +11,7 @@ import {
   trialBalanceFilterSchema,
 } from '@erp/shared';
 import { prisma } from '../../db/db';
+import { ApiError, notFound } from '../../lib/errors';
 import { requireAuth, requirePermission } from '../../middleware/auth';
 import { entryInclude, serializeEntry } from '../journals/journal.view';
 
@@ -260,6 +262,105 @@ reportRouter.get('/inventory-aging', requirePermission('reports:read'), async (r
 
   res.status(200).json({ asOf: asOfDate.toISOString().slice(0, 10), rows });
 });
+
+/** GET /reports/account-ledger/:accountId — posted lines with opening/running balance. */
+reportRouter.get(
+  '/account-ledger/:accountId',
+  requirePermission('reports:read'),
+  async (req, res) => {
+    const companyId = req.user!.companyId;
+    const accountId = req.params.accountId as string;
+    const { from, to } = accountLedgerFilterSchema.parse(req.query);
+
+    const account = await prisma.chartOfAccount.findFirst({
+      where: { accountId, companyId },
+      select: { accountId: true, accountCode: true, accountName: true, accountType: true },
+    });
+    if (!account) throw notFound('Account');
+
+    const lines = await prisma.journalEntryLine.findMany({
+      where: {
+        accountId,
+        account: { companyId },
+        entry: { companyId, status: 'POSTED', entryDate: { lte: new Date(`${to}T00:00:00.000Z`) } },
+      },
+      select: {
+        lineId: true,
+        entryId: true,
+        entryType: true,
+        amount: true,
+        description: true,
+        entry: {
+          select: {
+            entryNumber: true,
+            entryDate: true,
+            referenceType: true,
+            referenceId: true,
+            createdAt: true,
+          },
+        },
+      },
+      orderBy: [
+        { entry: { entryDate: 'asc' } },
+        { entry: { entryNumber: 'asc' } },
+        { lineId: 'asc' },
+      ],
+    });
+
+    const fromDate = new Date(`${from}T00:00:00.000Z`);
+    let opening = new Decimal(0);
+    let running = new Decimal(0);
+    const periodLines: Array<{
+      lineId: string;
+      entryId: string;
+      entryNumber: string;
+      entryDate: string;
+      referenceType: string | null;
+      referenceId: string | null;
+      description: string | null;
+      entryType: 'DEBIT' | 'CREDIT';
+      debit: number;
+      credit: number;
+      runningBalance: number;
+    }> = [];
+
+    for (const line of lines) {
+      const amount = line.amount.toString();
+      const delta = line.entryType === 'DEBIT' ? new Decimal(amount) : new Decimal(amount).negated();
+      if (line.entry.entryDate < fromDate) {
+        opening = opening.plus(delta);
+        running = running.plus(delta);
+        continue;
+      }
+      running = running.plus(delta);
+      periodLines.push({
+        lineId: line.lineId,
+        entryId: line.entryId,
+        entryNumber: line.entry.entryNumber,
+        entryDate: line.entry.entryDate.toISOString().slice(0, 10),
+        referenceType: line.entry.referenceType,
+        referenceId: line.entry.referenceId,
+        description: line.description,
+        entryType: line.entryType,
+        debit: line.entryType === 'DEBIT' ? moneyToNumber(amount) : 0,
+        credit: line.entryType === 'CREDIT' ? moneyToNumber(amount) : 0,
+        runningBalance: moneyToNumber(running),
+      });
+    }
+
+    res.status(200).json({
+      accountId: account.accountId,
+      accountCode: account.accountCode,
+      accountName: account.accountName,
+      accountType: account.accountType,
+      from,
+      to,
+      openingBalance: moneyToNumber(opening),
+      closingBalance: moneyToNumber(running),
+      lines: periodLines,
+    });
+  },
+);
 
 /** GET /reports/dashboard — counters + recent journals + low stock. */
 reportRouter.get('/dashboard', requirePermission('reports:read'), async (req, res) => {

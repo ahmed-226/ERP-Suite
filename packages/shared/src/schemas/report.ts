@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { AccountType, MovementType } from '../constants';
+import type { AccountType, EntryType, MovementType } from '../constants';
 import type { InventoryStock } from './inventory';
 import type { JournalEntry } from './journal';
 import { isoDateSchema, optionalIsoDateSchema } from './common';
@@ -20,6 +20,39 @@ export const trialBalanceFilterSchema = z.object({
 });
 
 export type TrialBalanceFilter = z.infer<typeof trialBalanceFilterSchema>;
+
+export const accountLedgerFilterSchema = z.object({
+  from: isoDateSchema.default('0001-01-01'),
+  to: isoDateSchema.default('9999-12-31'),
+});
+
+export type AccountLedgerFilter = z.infer<typeof accountLedgerFilterSchema>;
+
+export interface AccountLedgerLine {
+  lineId: string;
+  entryId: string;
+  entryNumber: string;
+  entryDate: string;
+  referenceType: string | null;
+  referenceId: string | null;
+  description: string | null;
+  entryType: EntryType;
+  debit: number;
+  credit: number;
+  runningBalance: number;
+}
+
+export interface AccountLedgerReport {
+  accountId: string;
+  accountCode: string;
+  accountName: string;
+  accountType: AccountType;
+  from: string;
+  to: string;
+  openingBalance: number;
+  closingBalance: number;
+  lines: AccountLedgerLine[];
+}
 
 /** Stock valued at the company-wide weighted-average cost, per product/warehouse. */
 export interface InventoryValuationRow {

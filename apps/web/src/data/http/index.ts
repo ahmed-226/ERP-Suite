@@ -1,6 +1,8 @@
 import type {
   Account,
   AccountFilter,
+  AccountLedgerFilter,
+  AccountLedgerReport,
   AdjustmentInput,
   AdminUser,
   AssignRoleInput,
@@ -177,6 +179,8 @@ export function createHttpDataSource(
     reports: {
       trialBalance: (filter: TrialBalanceFilter) =>
         get<TrialBalanceRow[]>('/reports/trial-balance', { from: filter.from, to: filter.to }),
+      accountLedger: (accountId: string, filter: AccountLedgerFilter) =>
+        get<AccountLedgerReport>(`/reports/account-ledger/${accountId}`, { from: filter.from, to: filter.to }),
       inventoryValuation: () => get<InventoryValuationReport>('/reports/inventory-valuation'),
       inventoryMovementSummary: (filter: InventoryMovementSummaryFilter) =>
         get<InventoryMovementSummaryReport>('/reports/inventory-movement-summary', {
