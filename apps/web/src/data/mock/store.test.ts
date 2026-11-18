@@ -273,13 +273,15 @@ describe('MockStore inventory invariants', () => {
     expect(into.unitCost).toBe(15);
 
     const report = await store.inventoryValuation();
-    expect(report.rows.find((row) => row.productId === product.productId)).toMatchObject({
-      quantityOnHand: 14,
-      averageCost: 15,
-      value: 210,
-    });
+    const rows = report.rows.filter((row) => row.productId === product.productId);
+    expect(rows).toHaveLength(2); // main + secondary after transfer
+    expect(rows.every((row) => row.averageCost === 15)).toBe(true);
+    expect(rows.reduce((sum, row) => sum + row.quantityOnHand, 0)).toBe(14);
+    expect(rows.reduce((sum, row) => sum + row.value, 0)).toBeCloseTo(210, 4);
     const summed = report.rows.reduce((sum, row) => sum + row.value, 0);
     expect(report.totalValue).toBeCloseTo(summed, 4);
+    expect(report.inventoryAccountBalance).toBeCloseTo(report.totalValue, 4);
+    expect(report.difference).toBeCloseTo(0, 4);
   });
 
   it('posts adjustment write-offs and gains against operating expenses', async () => {
@@ -364,11 +366,15 @@ describe('MockStore inventory invariants', () => {
       quantity: 2,
     });
 
-    const row = (await store.inventoryValuation()).rows.find(
-      (r) => r.productId === product.productId,
-    );
-    expect(row).toMatchObject({ quantityOnHand: 6, averageCost: 10, value: 60 });
-    expect((await inventoryNet()) - before).toBeCloseTo(row!.value, 4);
+    const report = await store.inventoryValuation();
+    const rows = report.rows.filter((r) => r.productId === product.productId);
+    const productValue = rows.reduce((sum, r) => sum + r.value, 0);
+    expect(rows.reduce((sum, r) => sum + r.quantityOnHand, 0)).toBe(6);
+    expect(rows.every((r) => r.averageCost === 10)).toBe(true);
+    expect(productValue).toBeCloseTo(60, 4);
+    expect((await inventoryNet()) - before).toBeCloseTo(productValue, 4);
+    expect(report.inventoryAccountBalance).toBeCloseTo(report.totalValue, 4);
+    expect(report.difference).toBeCloseTo(0, 4);
   });
 
   it('posts nothing for zero-value movements', async () => {
@@ -402,5 +408,52 @@ describe('MockStore inventory invariants', () => {
       (entry) => entry.referenceId !== null && movements.has(entry.referenceId),
     );
     expect(entries).toHaveLength(0);
+  });
+});
+
+describe('MockStore stocktakes', () => {
+  it('captures auditable variances and applies them via adjustment movements and GL postings', async () => {
+    const store = await newStore();
+    const product = await store.createProduct({ sku: 'STK-TEST-1', name: 'Stocktake product' });
+    await store.receipt({
+      productId: product.productId,
+      warehouseId: mainWarehouse,
+      quantity: 10,
+      unitCost: 5,
+    });
+
+    const draft = await store.createStocktake({
+      warehouseId: mainWarehouse,
+      notes: 'Cycle count',
+      lines: [{ productId: product.productId, countedQuantity: 7 }],
+    });
+    expect(draft.status).toBe('DRAFT');
+    expect(draft.lines[0]).toMatchObject({
+      productId: product.productId,
+      systemQuantity: 10,
+      countedQuantity: 7,
+      variance: -3,
+    });
+
+    const applied = await store.applyStocktake(draft.stocktakeId);
+    expect(applied.status).toBe('APPLIED');
+    expect(applied.appliedByName).toBeTruthy();
+    expect(applied.appliedAt).toBeTruthy();
+    expect(applied.lines[0]).toMatchObject({ systemQuantity: 10, countedQuantity: 7, variance: -3 });
+
+    const stock = (await store.listStock({ productId: product.productId, warehouseId: mainWarehouse }))[0];
+    expect(stock.quantityOnHand).toBe(7);
+
+    const movements = await store.listMovements({ productId: product.productId, movementType: 'ADJUSTMENT' });
+    const stMovement = movements.find((m) => m.referenceId === draft.stocktakeId);
+    expect(stMovement).toBeTruthy();
+    expect(stMovement?.quantity).toBe(-3);
+    expect(stMovement?.unitCost).toBe(5);
+
+    const entry = (await store.listJournals({})).find(
+      (j) => j.referenceId === stMovement?.transactionId && j.referenceType === 'ADJUSTMENT',
+    );
+    expect(entry?.status).toBe('POSTED');
+    expect(entry?.totalDebit).toBe(15);
   });
 });

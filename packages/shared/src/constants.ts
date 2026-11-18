@@ -25,6 +25,9 @@ export const MOVEMENT_TYPES = [
 ] as const;
 export type MovementType = (typeof MOVEMENT_TYPES)[number];
 
+export const STOCKTAKE_STATUSES = ['DRAFT', 'APPLIED', 'CANCELLED'] as const;
+export type StocktakeStatus = (typeof STOCKTAKE_STATUSES)[number];
+
 /**
  * Movement quantities are signed: positive brings stock in, negative takes it
  * out. Directional movement types derive their sign from the type, so the API,

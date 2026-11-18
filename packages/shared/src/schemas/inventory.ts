@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { MOVEMENT_TYPES, type MovementType } from '../constants';
+import {
+  MOVEMENT_TYPES,
+  STOCKTAKE_STATUSES,
+  type MovementType,
+  type StocktakeStatus,
+} from '../constants';
 import { optionalIsoDateSchema, uuidSchema } from './common';
 
 export const receiptSchema = z.object({
@@ -104,3 +109,42 @@ export const movementFilterSchema = z.object({
 });
 
 export type MovementFilter = z.infer<typeof movementFilterSchema>;
+
+export const stocktakeLineInputSchema = z.object({
+  productId: z.string().uuid(),
+  countedQuantity: z.number().int().min(0),
+});
+
+export const createStocktakeSchema = z.object({
+  warehouseId: z.string().uuid(),
+  notes: z.string().max(500).nullable().optional(),
+  lines: z.array(stocktakeLineInputSchema).min(1),
+});
+
+export type CreateStocktakeInput = z.infer<typeof createStocktakeSchema>;
+
+export interface StocktakeLine {
+  lineId: string;
+  productId: string;
+  sku: string;
+  productName: string;
+  systemQuantity: number;
+  countedQuantity: number;
+  variance: number;
+}
+
+export interface Stocktake {
+  stocktakeId: string;
+  warehouseId: string;
+  warehouseCode: string;
+  warehouseName: string;
+  status: StocktakeStatus;
+  notes: string | null;
+  createdBy: string;
+  createdByName: string;
+  appliedBy: string | null;
+  appliedByName: string | null;
+  appliedAt: string | null;
+  createdAt: string;
+  lines: StocktakeLine[];
+}

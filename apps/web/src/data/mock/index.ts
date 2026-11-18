@@ -48,10 +48,16 @@ export function createMockDataSource(options: { latency?: number } = {}): DataSo
       issue: (input) => store.issue(input),
       transfer: (input) => store.transfer(input),
       adjust: (input) => store.adjust(input),
+      stocktakes: (warehouseId) => store.listStocktakes(warehouseId),
+      stocktake: (id) => store.getStocktake(id),
+      createStocktake: (input) => store.createStocktake(input),
+      applyStocktake: (id) => store.applyStocktake(id),
     },
     reports: {
       trialBalance: (filter) => store.trialBalance(filter),
       inventoryValuation: () => store.inventoryValuation(),
+      inventoryMovementSummary: (filter) => store.inventoryMovementSummary(filter),
+      inventoryAging: (filter) => store.inventoryAging(filter),
       dashboard: () => store.dashboard(),
     },
     users: {

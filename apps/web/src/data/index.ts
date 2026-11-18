@@ -8,8 +8,13 @@ import type {
   CreateAccountInput,
   CreateJournalInput,
   CreateProductInput,
+  CreateStocktakeInput,
   CreateWarehouseInput,
   DashboardStats,
+  InventoryAgingFilter,
+  InventoryAgingReport,
+  InventoryMovementSummaryFilter,
+  InventoryMovementSummaryReport,
   InventoryStock,
   InventoryTransaction,
   InventoryValuationReport,
@@ -24,6 +29,7 @@ import type {
   ReceiptInput,
   RoleInfo,
   StockFilter,
+  Stocktake,
   TransferInput,
   TrialBalanceFilter,
   TrialBalanceRow,
@@ -88,11 +94,19 @@ export interface InventoryApi {
   issue(input: IssueInput): Promise<InventoryTransaction>;
   transfer(input: TransferInput): Promise<InventoryTransaction[]>;
   adjust(input: AdjustmentInput): Promise<InventoryTransaction>;
+  stocktakes(warehouseId?: string): Promise<Stocktake[]>;
+  stocktake(stocktakeId: string): Promise<Stocktake>;
+  createStocktake(input: CreateStocktakeInput): Promise<Stocktake>;
+  applyStocktake(stocktakeId: string): Promise<Stocktake>;
 }
 
 export interface ReportsApi {
   trialBalance(filter: TrialBalanceFilter): Promise<TrialBalanceRow[]>;
   inventoryValuation(): Promise<InventoryValuationReport>;
+  inventoryMovementSummary(
+    filter: InventoryMovementSummaryFilter,
+  ): Promise<InventoryMovementSummaryReport>;
+  inventoryAging(filter?: InventoryAgingFilter): Promise<InventoryAgingReport>;
   dashboard(): Promise<DashboardStats>;
 }
 

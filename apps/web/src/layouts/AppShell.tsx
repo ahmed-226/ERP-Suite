@@ -1,5 +1,6 @@
 import {
   AppstoreOutlined,
+  AuditOutlined,
   BankOutlined,
   BookOutlined,
   DashboardOutlined,
@@ -87,6 +88,11 @@ export function AppShell() {
           key: '/inventory/valuation',
           icon: <DatabaseOutlined />,
           label: 'Valuation',
+        },
+        can('inventory:read') && {
+          key: '/inventory/stocktakes',
+          icon: <AuditOutlined />,
+          label: 'Stocktakes',
         },
       ].filter(Boolean) as MenuItems
     );

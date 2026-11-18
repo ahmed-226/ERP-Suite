@@ -48,6 +48,12 @@ enum MovementType {
   ADJUSTMENT
 }
 
+enum StocktakeStatus {
+  DRAFT
+  APPLIED
+  CANCELLED
+}
+
 model Company {
   companyId  String   @id @default(uuid()) @map("company_id") @db.Uuid
   name       String   @db.VarChar(200)
@@ -62,6 +68,7 @@ model Company {
   stock                InventoryStock[]
   inventoryTransactions InventoryTransaction[]
   inventoryIdempotencyKeys InventoryIdempotencyKey[]
+  stocktakes           Stocktake[]
 
   @@map("companies")
 }
@@ -79,6 +86,8 @@ model User {
   roles      UserRole[]
   journals   JournalEntry[]    @relation("journal_created_by")
   movements  InventoryTransaction[] @relation("movement_created_by")
+  stocktakesCreated Stocktake[] @relation("stocktake_created_by")
+  stocktakesApplied Stocktake[] @relation("stocktake_applied_by")
 
   // Login resolves a user by email alone, so an address must identify exactly
   // one account across all tenants. A case-insensitive CHECK keeps the unique
@@ -207,6 +216,7 @@ model Warehouse {
   company    Company                @relation(fields: [companyId], references: [companyId], onDelete: Restrict)
   stock      InventoryStock[]
   movements  InventoryTransaction[]
+  stocktakes Stocktake[]
 
   @@unique([companyId, code])
   @@index([code])
@@ -225,9 +235,10 @@ model Product {
   isActive         Boolean  @default(true) @map("is_active")
   createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  company   Company                @relation(fields: [companyId], references: [companyId], onDelete: Restrict)
-  stock     InventoryStock[]
-  movements InventoryTransaction[]
+  company        Company                @relation(fields: [companyId], references: [companyId], onDelete: Restrict)
+  stock          InventoryStock[]
+  movements      InventoryTransaction[]
+  stocktakeLines StocktakeLine[]
 
   @@unique([companyId, sku])
   @@index([sku])
@@ -291,4 +302,41 @@ model InventoryIdempotencyKey {
   @@unique([companyId, key], map: "inventory_idempotency_keys_company_id_key_key")
   @@index([companyId, createdAt(sort: Desc)], map: "inventory_idempotency_keys_company_id_created_at_idx")
   @@map("inventory_idempotency_keys")
+}
+
+model Stocktake {
+  stocktakeId String          @id @default(uuid()) @map("stocktake_id") @db.Uuid
+  companyId   String          @map("company_id") @db.Uuid
+  warehouseId String          @map("warehouse_id") @db.Uuid
+  status      StocktakeStatus @default(DRAFT)
+  notes       String?
+  createdBy   String          @map("created_by") @db.Uuid
+  appliedBy   String?         @map("applied_by") @db.Uuid
+  appliedAt   DateTime?       @map("applied_at") @db.Timestamptz(6)
+  createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company   Company         @relation(fields: [companyId], references: [companyId], onDelete: Restrict)
+  warehouse Warehouse       @relation(fields: [warehouseId], references: [warehouseId], onDelete: Restrict)
+  creator   User            @relation("stocktake_created_by", fields: [createdBy], references: [userId], onDelete: Restrict)
+  applier   User?           @relation("stocktake_applied_by", fields: [appliedBy], references: [userId], onDelete: Restrict)
+  lines     StocktakeLine[]
+
+  @@index([companyId, warehouseId, createdAt(sort: Desc)])
+  @@map("stocktakes")
+}
+
+model StocktakeLine {
+  lineId          String @id @default(uuid()) @map("line_id") @db.Uuid
+  stocktakeId     String @map("stocktake_id") @db.Uuid
+  productId       String @map("product_id") @db.Uuid
+  systemQuantity  Int    @map("system_quantity")
+  countedQuantity Int    @map("counted_quantity")
+  variance        Int
+
+  stocktake Stocktake @relation(fields: [stocktakeId], references: [stocktakeId], onDelete: Cascade)
+  product   Product   @relation(fields: [productId], references: [productId], onDelete: Restrict)
+
+  @@unique([stocktakeId, productId])
+  @@index([stocktakeId])
+  @@map("stocktake_lines")
 }

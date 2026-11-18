@@ -14,6 +14,7 @@ import InventoryValuationPage from '@/pages/inventoryValuation';
 import StockPage from '@/pages/stock';
 import MovementsPage from '@/pages/movements';
 import InventoryOperationsPage from '@/pages/operations';
+import StocktakesPage from '@/pages/stocktakes';
 import SettingsPage from '@/pages/settings';
 
 export const router = createBrowserRouter([
@@ -73,6 +74,10 @@ export const router = createBrowserRouter([
       {
         path: 'inventory/valuation',
         element: <InventoryValuationPage />,
+      },
+      {
+        path: 'inventory/stocktakes',
+        element: <StocktakesPage />,
       },
 
       {

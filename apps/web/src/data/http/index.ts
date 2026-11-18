@@ -8,8 +8,13 @@ import type {
   CreateAccountInput,
   CreateJournalInput,
   CreateProductInput,
+  CreateStocktakeInput,
   CreateWarehouseInput,
   DashboardStats,
+  InventoryAgingFilter,
+  InventoryAgingReport,
+  InventoryMovementSummaryFilter,
+  InventoryMovementSummaryReport,
   InventoryStock,
   InventoryTransaction,
   InventoryValuationReport,
@@ -24,6 +29,7 @@ import type {
   ReceiptInput,
   RoleInfo,
   StockFilter,
+  Stocktake,
   TransferInput,
   TrialBalanceFilter,
   TrialBalanceRow,
@@ -155,11 +161,24 @@ export function createHttpDataSource(
       issue: (input: IssueInput) => post<InventoryTransaction>('/inventory/issues', input),
       transfer: (input: TransferInput) => post<InventoryTransaction[]>('/inventory/transfers', input),
       adjust: (input: AdjustmentInput) => post<InventoryTransaction>('/inventory/adjustments', input),
+      stocktakes: (warehouseId?: string) =>
+        get<Stocktake[]>('/inventory/stocktakes', { warehouseId }),
+      stocktake: (stocktakeId) => get<Stocktake>(`/inventory/stocktakes/${stocktakeId}`),
+      createStocktake: (input: CreateStocktakeInput) => post<Stocktake>('/inventory/stocktakes', input),
+      applyStocktake: (stocktakeId) =>
+        post<Stocktake>(`/inventory/stocktakes/${stocktakeId}/apply`, {}),
     },
     reports: {
       trialBalance: (filter: TrialBalanceFilter) =>
         get<TrialBalanceRow[]>('/reports/trial-balance', { from: filter.from, to: filter.to }),
       inventoryValuation: () => get<InventoryValuationReport>('/reports/inventory-valuation'),
+      inventoryMovementSummary: (filter: InventoryMovementSummaryFilter) =>
+        get<InventoryMovementSummaryReport>('/reports/inventory-movement-summary', {
+          from: filter.from,
+          to: filter.to,
+        }),
+      inventoryAging: (filter: InventoryAgingFilter = {}) =>
+        get<InventoryAgingReport>('/reports/inventory-aging', { asOf: filter.asOf }),
       dashboard: () => get<DashboardStats>('/reports/dashboard'),
     },
     users: {

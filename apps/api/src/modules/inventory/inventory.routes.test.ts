@@ -201,15 +201,20 @@ describe('weighted-average inventory valuation', () => {
       .get('/api/v1/reports/inventory-valuation')
       .set(auth(admin));
     expect(report.status).toBe(200);
-    const row = report.body.rows.find(
+    const rows = report.body.rows.filter(
       (r: { productId: string }) => r.productId === avgProductId,
     );
-    expect(row).toMatchObject({ quantityOnHand: 14, averageCost: 15, value: 210 });
+    expect(rows.length).toBe(2); // main + secondary after transfer
+    expect(rows.every((r: { averageCost: number }) => r.averageCost === 15)).toBe(true);
+    expect(rows.reduce((sum: number, r: { quantityOnHand: number }) => sum + r.quantityOnHand, 0)).toBe(14);
+    expect(rows.reduce((sum: number, r: { value: number }) => sum + r.value, 0)).toBeCloseTo(210, 4);
     const summed = report.body.rows.reduce(
       (sum: number, r: { value: number }) => sum + r.value,
       0,
     );
     expect(report.body.totalValue).toBeCloseTo(summed, 4);
+    expect(report.body.inventoryAccountBalance).toBeCloseTo(report.body.totalValue, 4);
+    expect(report.body.difference).toBeCloseTo(0, 4);
   });
 
   it('records COGS at valuation cost on the issue journal', async () => {

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import type { Request } from 'express';
 import {
   adjustmentSchema,
+  createStocktakeSchema,
   issueSchema,
   money,
   movementFilterSchema,
@@ -11,7 +12,7 @@ import {
   transferSchema,
 } from '@erp/shared';
 import { prisma } from '../../db/db';
-import { notFound } from '../../lib/errors';
+import { ApiError, notFound } from '../../lib/errors';
 import { requireAuth, requirePermission } from '../../middleware/auth';
 import {
   applyStockDeltas,
@@ -375,3 +376,202 @@ inventoryRouter.post('/adjustments', requirePermission('inventory:write'), async
   });
   res.status(result.status).json(result.body);
 });
+
+const stocktakeInclude = {
+  warehouse: { select: { code: true, name: true } },
+  creator: { select: { fullName: true } },
+  applier: { select: { fullName: true } },
+  lines: {
+    include: { product: { select: { sku: true, name: true } } },
+    orderBy: { product: { sku: 'asc' as const } },
+  },
+} as const;
+
+function serializeStocktake(st: {
+  stocktakeId: string;
+  warehouseId: string;
+  status: string;
+  notes: string | null;
+  createdBy: string;
+  appliedBy: string | null;
+  appliedAt: Date | null;
+  createdAt: Date;
+  warehouse: { code: string; name: string };
+  creator: { fullName: string };
+  applier: { fullName: string } | null;
+  lines: Array<{
+    lineId: string;
+    productId: string;
+    systemQuantity: number;
+    countedQuantity: number;
+    variance: number;
+    product: { sku: string; name: string };
+  }>;
+}) {
+  return {
+    stocktakeId: st.stocktakeId,
+    warehouseId: st.warehouseId,
+    warehouseCode: st.warehouse.code,
+    warehouseName: st.warehouse.name,
+    status: st.status,
+    notes: st.notes,
+    createdBy: st.createdBy,
+    createdByName: st.creator.fullName,
+    appliedBy: st.appliedBy,
+    appliedByName: st.applier?.fullName ?? null,
+    appliedAt: st.appliedAt?.toISOString() ?? null,
+    createdAt: st.createdAt.toISOString(),
+    lines: st.lines.map((line) => ({
+      lineId: line.lineId,
+      productId: line.productId,
+      sku: line.product.sku,
+      productName: line.product.name,
+      systemQuantity: line.systemQuantity,
+      countedQuantity: line.countedQuantity,
+      variance: line.variance,
+    })),
+  };
+}
+
+/** GET /inventory/stocktakes — list count sheets for the company. */
+inventoryRouter.get('/stocktakes', requirePermission('inventory:read'), async (req, res) => {
+  const companyId = req.user!.companyId;
+  const warehouseId = typeof req.query.warehouseId === 'string' ? req.query.warehouseId : undefined;
+  const stocktakes = await prisma.stocktake.findMany({
+    where: { companyId, ...(warehouseId ? { warehouseId } : {}) },
+    include: stocktakeInclude,
+    orderBy: { createdAt: 'desc' },
+  });
+  res.status(200).json(stocktakes.map(serializeStocktake));
+});
+
+/** GET /inventory/stocktakes/:stocktakeId */
+inventoryRouter.get('/stocktakes/:stocktakeId', requirePermission('inventory:read'), async (req, res) => {
+  const stocktake = await prisma.stocktake.findFirst({
+    where: { stocktakeId: req.params.stocktakeId, companyId: req.user!.companyId },
+    include: stocktakeInclude,
+  });
+  if (!stocktake) throw notFound('Stocktake');
+  res.status(200).json(serializeStocktake(stocktake));
+});
+
+/** POST /inventory/stocktakes — create a draft count sheet with captured system quantities. */
+inventoryRouter.post('/stocktakes', requirePermission('inventory:write'), async (req, res) => {
+  const input = createStocktakeSchema.parse(req.body);
+  const companyId = req.user!.companyId;
+  await assertWarehouseInCompany(companyId, input.warehouseId);
+
+  const productIds = input.lines.map((l) => l.productId);
+  if (new Set(productIds).size !== productIds.length) {
+    throw new ApiError(422, 'DUPLICATE_PRODUCT', 'Each product can appear once per count sheet');
+  }
+
+  const products = await prisma.product.findMany({
+    where: { companyId, productId: { in: productIds } },
+    select: { productId: true },
+  });
+  if (products.length !== productIds.length) throw notFound('Product');
+
+  const stockRows = await prisma.inventoryStock.findMany({
+    where: { companyId, warehouseId: input.warehouseId, productId: { in: productIds } },
+    select: { productId: true, quantityOnHand: true },
+  });
+  const onHandByProduct = new Map(stockRows.map((s) => [s.productId, s.quantityOnHand]));
+
+  const created = await prisma.stocktake.create({
+    data: {
+      companyId,
+      warehouseId: input.warehouseId,
+      notes: input.notes ?? null,
+      createdBy: req.user!.userId,
+      lines: {
+        create: input.lines.map((line) => {
+          const systemQuantity = onHandByProduct.get(line.productId) ?? 0;
+          return {
+            productId: line.productId,
+            systemQuantity,
+            countedQuantity: line.countedQuantity,
+            variance: line.countedQuantity - systemQuantity,
+          };
+        }),
+      },
+    },
+    include: stocktakeInclude,
+  });
+
+  res.status(201).json(serializeStocktake(created));
+});
+
+/** POST /inventory/stocktakes/:stocktakeId/apply — approve and post adjustment movements/GL for variances. */
+inventoryRouter.post(
+  '/stocktakes/:stocktakeId/apply',
+  requirePermission('inventory:write'),
+  async (req, res) => {
+    const companyId = req.user!.companyId;
+    const userId = req.user!.userId;
+    const stocktakeId = req.params.stocktakeId;
+
+    const applied = await prisma.$transaction(async (tx) => {
+      const stocktake = await tx.stocktake.findFirst({
+        where: { stocktakeId, companyId },
+        include: { lines: true, warehouse: { select: { code: true, name: true } } },
+      });
+      if (!stocktake) throw notFound('Stocktake');
+      if (stocktake.status !== 'DRAFT') {
+        throw new ApiError(409, 'STOCKTAKE_NOT_DRAFT', 'Only draft stocktakes can be applied');
+      }
+
+      // Apply recorded variances as adjustment movements (auditable, no direct ledger edits).
+      for (const line of stocktake.lines) {
+        if (line.variance === 0) continue;
+        const product = await tx.product.findUniqueOrThrow({
+          where: { productId: line.productId },
+          select: { averageCost: true },
+        });
+        const unitCost = Number(product.averageCost);
+        await applyStockDeltas(tx, {
+          companyId,
+          productId: line.productId,
+          deltas: [{ warehouseId: stocktake.warehouseId, quantityDelta: line.variance }],
+        });
+        const created = await recordMovement(tx, {
+          companyId,
+          productId: line.productId,
+          warehouseId: stocktake.warehouseId,
+          movementType: 'ADJUSTMENT',
+          quantity: line.variance,
+          unitCost,
+          referenceId: stocktake.stocktakeId,
+          userId,
+        });
+        const amount = money(Math.abs(line.variance)).times(unitCost);
+        if (!amount.isZero()) {
+          const accounts = await systemAccountIds(tx, companyId);
+          const writeOff = line.variance < 0;
+          await postInventoryJournal(tx, {
+            companyId,
+            userId,
+            entryDate: new Date(),
+            referenceType: 'ADJUSTMENT',
+            referenceId: created.transactionId,
+            debitAccountId: writeOff ? accounts.operatingExpenses : accounts.inventory,
+            creditAccountId: writeOff ? accounts.inventory : accounts.operatingExpenses,
+            amount,
+          });
+        }
+      }
+
+      await tx.stocktake.update({
+        where: { stocktakeId },
+        data: { status: 'APPLIED', appliedBy: userId, appliedAt: new Date() },
+      });
+
+      return tx.stocktake.findUniqueOrThrow({
+        where: { stocktakeId },
+        include: stocktakeInclude,
+      });
+    });
+
+    res.status(200).json(serializeStocktake(applied));
+  },
+);

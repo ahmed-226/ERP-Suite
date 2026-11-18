@@ -12,9 +12,14 @@ import {
   type CreateAccountInput,
   type CreateJournalInput,
   type CreateProductInput,
+  type CreateStocktakeInput,
   type CreateWarehouseInput,
   type DashboardStats,
   type EntryType,
+  type InventoryAgingFilter,
+  type InventoryAgingReport,
+  type InventoryMovementSummaryFilter,
+  type InventoryMovementSummaryReport,
   type InventoryStock,
   type InventoryTransaction,
   type InventoryValuationReport,
@@ -31,6 +36,9 @@ import {
   type ProductFilter,
   type ReceiptInput,
   type StockFilter,
+  type Stocktake,
+  type StocktakeLine,
+  type StocktakeStatus,
   type TransferInput,
   type TrialBalanceFilter,
   type TrialBalanceRow,
@@ -76,6 +84,26 @@ interface NewJournalInput {
   lines: { accountId: string; entryType: EntryType; amount: number; description: string | null }[];
 }
 
+interface StocktakeLineRow {
+  lineId: string;
+  productId: string;
+  systemQuantity: number;
+  countedQuantity: number;
+  variance: number;
+}
+
+interface StocktakeRow {
+  stocktakeId: string;
+  warehouseId: string;
+  status: StocktakeStatus;
+  notes: string | null;
+  createdBy: string;
+  appliedBy: string | null;
+  appliedAt: string | null;
+  createdAt: string;
+  lines: StocktakeLineRow[];
+}
+
 const uid = (): string => globalThis.crypto.randomUUID();
 const today = (): string => new Date().toISOString().slice(0, 10);
 
@@ -101,6 +129,7 @@ export class MockStore {
   private movements: MovementRow[];
   private journals: JournalEntry[];
   private users: { userId: string; roleCode: string; isActive: boolean }[];
+  private stocktakes: StocktakeRow[];
 
   private currentUserId: string | null = null;
   private journalCounter = seed.journals.length;
@@ -154,6 +183,7 @@ export class MockStore {
     this.movements = seed.movements.map((m) => ({ ...m }));
     this.journals = seed.journals.map((j) => this.buildEntry(j));
     this.users = seed.users.map((u) => ({ userId: u.userId, roleCode: u.roleCode, isActive: true }));
+    this.stocktakes = [];
 
     this.restoreSession();
   }
@@ -1107,6 +1137,149 @@ export class MockStore {
     return this.enrichMovement(movement);
   }
 
+  // ----------------------------------------------------------- stocktakes
+
+  private enrichStocktake(row: StocktakeRow): Stocktake {
+    const warehouse = this.warehouseById(row.warehouseId);
+    return {
+      stocktakeId: row.stocktakeId,
+      warehouseId: row.warehouseId,
+      warehouseCode: warehouse.code,
+      warehouseName: warehouse.name,
+      status: row.status,
+      notes: row.notes,
+      createdBy: row.createdBy,
+      createdByName: this.userName(row.createdBy),
+      appliedBy: row.appliedBy,
+      appliedByName: row.appliedBy ? this.userName(row.appliedBy) : null,
+      appliedAt: row.appliedAt,
+      createdAt: row.createdAt,
+      lines: row.lines
+        .map((line) => {
+          const product = this.productById(line.productId);
+          return {
+            lineId: line.lineId,
+            productId: line.productId,
+            sku: product.sku,
+            productName: product.name,
+            systemQuantity: line.systemQuantity,
+            countedQuantity: line.countedQuantity,
+            variance: line.variance,
+          } satisfies StocktakeLine;
+        })
+        .sort((a, b) => a.sku.localeCompare(b.sku)),
+    };
+  }
+
+  async listStocktakes(warehouseId?: string): Promise<Stocktake[]> {
+    await this.wait();
+    return this.stocktakes
+      .filter((s) => (warehouseId ? s.warehouseId === warehouseId : true))
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+      .map((s) => this.enrichStocktake(s));
+  }
+
+  async getStocktake(stocktakeId: string): Promise<Stocktake> {
+    await this.wait();
+    const row = this.stocktakes.find((s) => s.stocktakeId === stocktakeId);
+    if (!row) throw new DataError('STOCKTAKE_NOT_FOUND', 'Stocktake not found', 404);
+    return this.enrichStocktake(row);
+  }
+
+  async createStocktake(input: CreateStocktakeInput): Promise<Stocktake> {
+    await this.wait();
+    const actor = this.requireActor();
+    this.warehouseById(input.warehouseId);
+
+    const seen = new Set<string>();
+    for (const line of input.lines) {
+      if (seen.has(line.productId)) {
+        throw new DataError('DUPLICATE_PRODUCT', 'Each product can appear once per count sheet', 422);
+      }
+      seen.add(line.productId);
+      this.productById(line.productId);
+    }
+
+    const row: StocktakeRow = {
+      stocktakeId: uid(),
+      warehouseId: input.warehouseId,
+      status: 'DRAFT',
+      notes: input.notes ?? null,
+      createdBy: actor,
+      appliedBy: null,
+      appliedAt: null,
+      createdAt: new Date().toISOString(),
+      lines: input.lines.map((line) => {
+        const systemQuantity = this.findStock(line.productId, input.warehouseId)?.quantityOnHand ?? 0;
+        return {
+          lineId: uid(),
+          productId: line.productId,
+          systemQuantity,
+          countedQuantity: line.countedQuantity,
+          variance: line.countedQuantity - systemQuantity,
+        };
+      }),
+    };
+    this.stocktakes.push(row);
+    return this.enrichStocktake(row);
+  }
+
+  async applyStocktake(stocktakeId: string): Promise<Stocktake> {
+    await this.wait();
+    const actor = this.requireActor();
+    const row = this.stocktakes.find((s) => s.stocktakeId === stocktakeId);
+    if (!row) throw new DataError('STOCKTAKE_NOT_FOUND', 'Stocktake not found', 404);
+    if (row.status !== 'DRAFT') {
+      throw new DataError('STOCKTAKE_NOT_DRAFT', 'Only draft stocktakes can be applied', 409);
+    }
+
+    for (const line of row.lines) {
+      if (line.variance === 0) continue;
+      const product = this.productById(line.productId);
+      const stock = this.upsertStock(line.productId, row.warehouseId);
+      const next = stock.quantityOnHand + line.variance;
+      if (next < 0) {
+        throw new DataError(
+          'INSUFFICIENT_STOCK',
+          `Applying count would make ${product.sku} stock negative`,
+          422,
+        );
+      }
+      stock.quantityOnHand = next;
+      stock.updatedAt = new Date().toISOString();
+
+      const movement = this.addMovement(
+        line.productId,
+        row.warehouseId,
+        'ADJUSTMENT',
+        line.variance,
+        product.averageCost,
+        row.stocktakeId,
+      );
+      const amount = moneyToNumber(money(Math.abs(line.variance)).times(product.averageCost));
+      if (amount !== 0) {
+        const writeOff = line.variance < 0;
+        this.inventoryEntry(
+          'ADJUSTMENT',
+          movement.transactionId,
+          this.accountByCode(
+            writeOff ? SYSTEM_ACCOUNT_CODES.operatingExpenses : SYSTEM_ACCOUNT_CODES.inventory,
+          ).accountId,
+          this.accountByCode(
+            writeOff ? SYSTEM_ACCOUNT_CODES.inventory : SYSTEM_ACCOUNT_CODES.operatingExpenses,
+          ).accountId,
+          amount,
+          `Stocktake adjustment - ${product.sku}`,
+        );
+      }
+    }
+
+    row.status = 'APPLIED';
+    row.appliedBy = actor;
+    row.appliedAt = new Date().toISOString();
+    return this.enrichStocktake(row);
+  }
+
   // ------------------------------------------------------------- reports
 
   async trialBalance(filter: TrialBalanceFilter): Promise<TrialBalanceRow[]> {
@@ -1153,30 +1326,148 @@ export class MockStore {
       .sort((a, b) => a.accountCode.localeCompare(b.accountCode));
   }
 
+  private inventoryAccountBalance(): number {
+    const inventoryAccountId = this.accountByCode(SYSTEM_ACCOUNT_CODES.inventory).accountId;
+    let net = new Decimal(0);
+    for (const entry of this.journals) {
+      if (entry.status !== 'POSTED') continue;
+      for (const line of entry.lines) {
+        if (line.accountId !== inventoryAccountId) continue;
+        net = line.entryType === 'DEBIT' ? net.plus(line.amount) : net.minus(line.amount);
+      }
+    }
+    return moneyToNumber(net);
+  }
+
   async inventoryValuation(): Promise<InventoryValuationReport> {
     await this.wait();
-    const quantities = new Map<string, number>();
-    for (const row of this.stock) {
-      quantities.set(row.productId, (quantities.get(row.productId) ?? 0) + row.quantityOnHand);
-    }
-    const rows = [...quantities.entries()]
-      .map(([productId, quantityOnHand]) => {
-        const product = this.productById(productId);
+    const rows = this.stock
+      .filter((row) => row.quantityOnHand !== 0)
+      .map((row) => {
+        const product = this.productById(row.productId);
+        const warehouse = this.warehouseById(row.warehouseId);
+        const value = moneyToNumber(money(row.quantityOnHand).times(product.averageCost));
         return {
-          productId,
+          productId: row.productId,
+          warehouseId: row.warehouseId,
           sku: product.sku,
           productName: product.name,
-          quantityOnHand,
+          warehouseCode: warehouse.code,
+          warehouseName: warehouse.name,
+          quantityOnHand: row.quantityOnHand,
           averageCost: product.averageCost,
-          value: moneyToNumber(money(quantityOnHand).times(product.averageCost)),
+          value,
         };
       })
-      .filter((row) => row.quantityOnHand !== 0)
-      .sort((a, b) => a.sku.localeCompare(b.sku));
+      .sort(
+        (a, b) => a.sku.localeCompare(b.sku) || a.warehouseCode.localeCompare(b.warehouseCode),
+      );
+    const totalValue = moneyToNumber(sumMoney(rows.map((row) => row.value)));
+    const inventoryAccountBalance = this.inventoryAccountBalance();
     return {
       rows,
-      totalValue: moneyToNumber(sumMoney(rows.map((row) => row.value))),
+      totalValue,
+      inventoryAccountBalance,
+      difference: moneyToNumber(money(totalValue).minus(inventoryAccountBalance)),
     };
+  }
+
+  async inventoryMovementSummary(
+    filter: InventoryMovementSummaryFilter,
+  ): Promise<InventoryMovementSummaryReport> {
+    await this.wait();
+    const groups = new Map<
+      string,
+      {
+        period: string;
+        movementType: MovementType;
+        movementCount: number;
+        quantityIn: Decimal;
+        quantityOut: Decimal;
+        totalValue: Decimal;
+      }
+    >();
+
+    for (const m of this.movements) {
+      const date = m.createdAt.slice(0, 10);
+      if (date < filter.from || date > filter.to) continue;
+      const period = m.createdAt.slice(0, 7);
+      const key = `${period}|${m.movementType}`;
+      let row = groups.get(key);
+      if (!row) {
+        row = {
+          period,
+          movementType: m.movementType,
+          movementCount: 0,
+          quantityIn: new Decimal(0),
+          quantityOut: new Decimal(0),
+          totalValue: new Decimal(0),
+        };
+        groups.set(key, row);
+      }
+      row.movementCount += 1;
+      const qty = Math.abs(m.quantity);
+      row.totalValue = row.totalValue.plus(money(qty).times(m.unitCost));
+      if (m.quantity >= 0) row.quantityIn = row.quantityIn.plus(qty);
+      else row.quantityOut = row.quantityOut.plus(qty);
+    }
+
+    const rows = [...groups.values()]
+      .map((r) => ({
+        period: r.period,
+        movementType: r.movementType,
+        movementCount: r.movementCount,
+        quantityIn: moneyToNumber(r.quantityIn),
+        quantityOut: moneyToNumber(r.quantityOut),
+        totalValue: moneyToNumber(r.totalValue),
+      }))
+      .sort(
+        (a, b) => a.period.localeCompare(b.period) || a.movementType.localeCompare(b.movementType),
+      );
+    return { rows };
+  }
+
+  async inventoryAging(filter: InventoryAgingFilter = {}): Promise<InventoryAgingReport> {
+    await this.wait();
+    const asOf = filter.asOf ?? today();
+    const asOfTime = new Date(`${asOf}T23:59:59.999Z`).getTime();
+    const lastByKey = new Map<string, string>();
+    for (const m of this.movements) {
+      const key = `${m.productId}|${m.warehouseId}`;
+      const prev = lastByKey.get(key);
+      if (!prev || m.createdAt > prev) lastByKey.set(key, m.createdAt);
+    }
+
+    const rows = this.stock
+      .filter((row) => row.quantityOnHand > 0)
+      .map((row) => {
+        const product = this.productById(row.productId);
+        const warehouse = this.warehouseById(row.warehouseId);
+        const last = lastByKey.get(`${row.productId}|${row.warehouseId}`) ?? null;
+        const daysSinceLastMovement =
+          last === null
+            ? null
+            : Math.max(0, Math.floor((asOfTime - new Date(last).getTime()) / 86_400_000));
+        return {
+          productId: row.productId,
+          warehouseId: row.warehouseId,
+          sku: product.sku,
+          productName: product.name,
+          warehouseCode: warehouse.code,
+          warehouseName: warehouse.name,
+          quantityOnHand: row.quantityOnHand,
+          averageCost: product.averageCost,
+          value: moneyToNumber(money(row.quantityOnHand).times(product.averageCost)),
+          lastMovementAt: last,
+          daysSinceLastMovement,
+        };
+      })
+      .sort((a, b) => {
+        const da = a.daysSinceLastMovement ?? -1;
+        const db = b.daysSinceLastMovement ?? -1;
+        return db - da || a.sku.localeCompare(b.sku) || a.warehouseCode.localeCompare(b.warehouseCode);
+      });
+    return { asOf, rows };
   }
 
   async dashboard(): Promise<DashboardStats> {
