@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { accountRouter } from '../modules/accounts/accounts.routes';
 import { authRouter } from '../modules/auth/auth.routes';
+import { fiscalRouter } from '../modules/fiscal/fiscal.routes';
 import { healthRouter } from '../modules/health/health.routes';
 import { inventoryRouter } from '../modules/inventory/inventory.routes';
 import { journalRouter } from '../modules/journals/journals.routes';
@@ -20,4 +21,5 @@ apiRouter.use('/products', productRouter);
 apiRouter.use('/warehouses', warehouseRouter);
 apiRouter.use('/inventory', inventoryRouter);
 apiRouter.use('/reports', reportRouter);
+apiRouter.use('/fiscal', fiscalRouter);
 apiRouter.use('/users', userRouter);

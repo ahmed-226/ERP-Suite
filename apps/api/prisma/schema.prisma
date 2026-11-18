@@ -54,21 +54,34 @@ enum StocktakeStatus {
   CANCELLED
 }
 
+enum FiscalYearStatus {
+  OPEN
+  CLOSED
+}
+
+enum FiscalPeriodStatus {
+  OPEN
+  CLOSED
+}
+
 model Company {
   companyId  String   @id @default(uuid()) @map("company_id") @db.Uuid
   name       String   @db.VarChar(200)
   createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  users                User[]
-  roles                Role[]
-  accounts             ChartOfAccount[]
-  warehouses           Warehouse[]
-  products             Product[]
-  journalEntries       JournalEntry[]
-  stock                InventoryStock[]
-  inventoryTransactions InventoryTransaction[]
+  users                    User[]
+  roles                    Role[]
+  accounts                 ChartOfAccount[]
+  warehouses               Warehouse[]
+  products                 Product[]
+  journalEntries           JournalEntry[]
+  stock                    InventoryStock[]
+  inventoryTransactions    InventoryTransaction[]
   inventoryIdempotencyKeys InventoryIdempotencyKey[]
-  stocktakes           Stocktake[]
+  stocktakes               Stocktake[]
+  fiscalYears              FiscalYear[]
+  fiscalPeriods            FiscalPeriod[]
+  fiscalEvents             FiscalEvent[]
 
   @@map("companies")
 }
@@ -88,6 +101,9 @@ model User {
   movements  InventoryTransaction[] @relation("movement_created_by")
   stocktakesCreated Stocktake[] @relation("stocktake_created_by")
   stocktakesApplied Stocktake[] @relation("stocktake_applied_by")
+  fiscalEvents      FiscalEvent[] @relation("fiscal_event_actor")
+  fiscalYearsClosed FiscalYear[]  @relation("fiscal_year_closed_by")
+  fiscalPeriodsClosed FiscalPeriod[] @relation("fiscal_period_closed_by")
 
   // Login resolves a user by email alone, so an address must identify exactly
   // one account across all tenants. A case-insensitive CHECK keeps the unique
@@ -181,6 +197,7 @@ model JournalEntry {
   company Company             @relation(fields: [companyId], references: [companyId], onDelete: Restrict)
   createdByUser User            @relation("journal_created_by", fields: [createdBy], references: [userId], onDelete: Restrict)
   lines   JournalEntryLine[]
+  fiscalYearClosed FiscalYear?  @relation("fiscal_year_closing_entry")
 
   @@unique([companyId, entryNumber])
   @@index([entryDate, status])
@@ -339,4 +356,69 @@ model StocktakeLine {
   @@unique([stocktakeId, productId])
   @@index([stocktakeId])
   @@map("stocktake_lines")
+}
+
+model FiscalYear {
+  fiscalYearId   String           @id @default(uuid()) @map("fiscal_year_id") @db.Uuid
+  companyId      String           @map("company_id") @db.Uuid
+  name           String           @db.VarChar(50)
+  startDate      DateTime         @map("start_date") @db.Date
+  endDate        DateTime         @map("end_date") @db.Date
+  status         FiscalYearStatus @default(OPEN)
+  closedAt       DateTime?        @map("closed_at") @db.Timestamptz(6)
+  closedBy       String?          @map("closed_by") @db.Uuid
+  closingEntryId String?          @map("closing_entry_id") @db.Uuid
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company      Company       @relation(fields: [companyId], references: [companyId], onDelete: Restrict)
+  closedByUser User?         @relation("fiscal_year_closed_by", fields: [closedBy], references: [userId], onDelete: Restrict)
+  closingEntry JournalEntry? @relation("fiscal_year_closing_entry", fields: [closingEntryId], references: [entryId], onDelete: Restrict)
+  periods      FiscalPeriod[]
+  events       FiscalEvent[]
+
+  @@unique([companyId, name])
+  @@index([companyId, startDate])
+  @@map("fiscal_years")
+}
+
+model FiscalPeriod {
+  periodId     String             @id @default(uuid()) @map("period_id") @db.Uuid
+  fiscalYearId String             @map("fiscal_year_id") @db.Uuid
+  companyId    String             @map("company_id") @db.Uuid
+  name         String             @db.VarChar(50)
+  periodNumber Int                @map("period_number")
+  startDate    DateTime           @map("start_date") @db.Date
+  endDate      DateTime           @map("end_date") @db.Date
+  status       FiscalPeriodStatus @default(OPEN)
+  closedAt     DateTime?          @map("closed_at") @db.Timestamptz(6)
+  closedBy     String?            @map("closed_by") @db.Uuid
+  createdAt    DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  fiscalYear   FiscalYear    @relation(fields: [fiscalYearId], references: [fiscalYearId], onDelete: Cascade)
+  company      Company       @relation(fields: [companyId], references: [companyId], onDelete: Restrict)
+  closedByUser User?         @relation("fiscal_period_closed_by", fields: [closedBy], references: [userId], onDelete: Restrict)
+  events       FiscalEvent[]
+
+  @@unique([fiscalYearId, periodNumber])
+  @@index([companyId, startDate, endDate])
+  @@map("fiscal_periods")
+}
+
+model FiscalEvent {
+  eventId      String   @id @default(uuid()) @map("event_id") @db.Uuid
+  companyId    String   @map("company_id") @db.Uuid
+  fiscalYearId String?  @map("fiscal_year_id") @db.Uuid
+  periodId     String?  @map("period_id") @db.Uuid
+  action       String   @db.VarChar(30)
+  reason       String?
+  actorUserId  String   @map("actor_user_id") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company    Company       @relation(fields: [companyId], references: [companyId], onDelete: Restrict)
+  fiscalYear FiscalYear?   @relation(fields: [fiscalYearId], references: [fiscalYearId], onDelete: Cascade)
+  period     FiscalPeriod? @relation(fields: [periodId], references: [periodId], onDelete: Cascade)
+  actor      User          @relation("fiscal_event_actor", fields: [actorUserId], references: [userId], onDelete: Restrict)
+
+  @@index([companyId, createdAt(sort: Desc)])
+  @@map("fiscal_events")
 }

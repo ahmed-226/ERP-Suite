@@ -11,6 +11,7 @@ import {
 import { prisma } from '../../db/db';
 import { ApiError, notFound } from '../../lib/errors';
 import { requireAuth, requirePermission } from '../../middleware/auth';
+import { assertPeriodOpen } from '../fiscal/fiscal.service';
 import { entryInclude, entryWhere, nextEntryNumber, serializeEntry } from './journal.view';
 
 export const journalRouter = Router();
@@ -97,6 +98,7 @@ journalRouter.post('/', requirePermission('journals:write'), async (req, res) =>
   const userId = req.user!.userId;
 
   const entry = await prisma.$transaction(async (tx) => {
+    await assertPeriodOpen(tx, companyId, input.entryDate);
     await assertAccountsUsable(tx, companyId, input.lines);
     const nextNumber = await nextEntryNumber(tx, companyId);
     return tx.journalEntry.create({
@@ -132,11 +134,15 @@ journalRouter.patch('/:entryId', requirePermission('journals:write'), async (req
   const result = await prisma.$transaction(async (tx) => {
     const existing = await tx.journalEntry.findFirst({
       where: { entryId, companyId },
-      select: { status: true },
+      select: { status: true, entryDate: true },
     });
     if (!existing) throw notFound('Journal entry');
     if (existing.status !== 'DRAFT') {
       throw new ApiError(409, 'ENTRY_IMMUTABLE', `A ${existing.status} entry cannot be edited`);
+    }
+    await assertPeriodOpen(tx, companyId, existing.entryDate);
+    if (input.entryDate !== undefined) {
+      await assertPeriodOpen(tx, companyId, input.entryDate);
     }
     if (input.lines) {
       await assertAccountsUsable(tx, companyId, input.lines);
@@ -178,6 +184,7 @@ journalRouter.post('/:entryId/post', requirePermission('journals:post'), async (
     if (existing.status !== 'DRAFT') {
       throw new ApiError(422, 'ENTRY_NOT_POSTABLE', 'Only draft entries can be posted');
     }
+    await assertPeriodOpen(tx, companyId, existing.entryDate);
     await assertAccountsUsable(tx, companyId, existing.lines);
     const balance = sumMoney(
       existing.lines.map((l) => signedAmount(l.entryType, l.amount)),
@@ -219,6 +226,7 @@ journalRouter.post('/:entryId/void', requirePermission('journals:post'), async (
     }
 
     if (existing.status === 'DRAFT') {
+      await assertPeriodOpen(tx, companyId, existing.entryDate);
       const voided = await tx.journalEntry.update({
         where: { entryId },
         data: { status: 'VOIDED' },
@@ -235,13 +243,17 @@ journalRouter.post('/:entryId/void', requirePermission('journals:post'), async (
       throw new ApiError(409, 'ENTRY_ALREADY_VOID', 'Entry has already been reversed');
     }
 
+    // Posted entries stay in the ledger; the correcting reversal is posted today.
+    const reversalDate = new Date().toISOString().slice(0, 10);
+    await assertPeriodOpen(tx, companyId, reversalDate);
+
     // Create DRAFT first: the line-immutability trigger rejects new lines on a
     // POSTED entry. Flipping it POSTED then runs the balance guard.
     const reversal = await tx.journalEntry.create({
       data: {
         companyId,
         entryNumber: await nextEntryNumber(tx, companyId),
-        entryDate: new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`),
+        entryDate: new Date(`${reversalDate}T00:00:00.000Z`),
         referenceType: REVERSAL_REFERENCE_TYPE,
         referenceId: entryId,
         status: 'DRAFT',

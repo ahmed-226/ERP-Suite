@@ -6,11 +6,16 @@ import type {
   AssignRoleInput,
   AuthUser,
   CreateAccountInput,
+  CreateFiscalPeriodInput,
+  CreateFiscalYearInput,
   CreateJournalInput,
   CreateProductInput,
   CreateStocktakeInput,
   CreateWarehouseInput,
   DashboardStats,
+  FiscalEvent,
+  FiscalPeriod,
+  FiscalYear,
   InventoryAgingFilter,
   InventoryAgingReport,
   InventoryMovementSummaryFilter,
@@ -27,6 +32,7 @@ import type {
   Product,
   ProductFilter,
   ReceiptInput,
+  ReopenPeriodInput,
   RoleInfo,
   StockFilter,
   Stocktake,
@@ -180,6 +186,17 @@ export function createHttpDataSource(
       inventoryAging: (filter: InventoryAgingFilter = {}) =>
         get<InventoryAgingReport>('/reports/inventory-aging', { asOf: filter.asOf }),
       dashboard: () => get<DashboardStats>('/reports/dashboard'),
+    },
+    fiscal: {
+      listYears: () => get<FiscalYear[]>('/fiscal/years'),
+      createYear: (input: CreateFiscalYearInput) => post<FiscalYear>('/fiscal/years', input),
+      createPeriod: (fiscalYearId: string, input: CreateFiscalPeriodInput) =>
+        post<FiscalPeriod>(`/fiscal/years/${fiscalYearId}/periods`, input),
+      closePeriod: (periodId: string) => post<FiscalPeriod>(`/fiscal/periods/${periodId}/close`, {}),
+      reopenPeriod: (periodId: string, input: ReopenPeriodInput = {}) =>
+        post<FiscalPeriod>(`/fiscal/periods/${periodId}/reopen`, input),
+      yearEndClose: (fiscalYearId: string) => post<FiscalYear>(`/fiscal/years/${fiscalYearId}/year-end-close`, {}),
+      events: () => get<FiscalEvent[]>('/fiscal/events'),
     },
     users: {
       list: () => get<AdminUser[]>('/users'),

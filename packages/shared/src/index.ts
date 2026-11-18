@@ -9,6 +9,7 @@ export * from './schemas/product';
 export * from './schemas/warehouse';
 export * from './schemas/inventory';
 export * from './schemas/report';
+export * from './schemas/fiscal';
 export * from './schemas/user';
 
 export * from './seed';

@@ -6,11 +6,16 @@ import type {
   AssignRoleInput,
   AuthUser,
   CreateAccountInput,
+  CreateFiscalPeriodInput,
+  CreateFiscalYearInput,
   CreateJournalInput,
   CreateProductInput,
   CreateStocktakeInput,
   CreateWarehouseInput,
   DashboardStats,
+  FiscalEvent,
+  FiscalYear,
+  FiscalPeriod,
   InventoryAgingFilter,
   InventoryAgingReport,
   InventoryMovementSummaryFilter,
@@ -27,6 +32,7 @@ import type {
   Product,
   ProductFilter,
   ReceiptInput,
+  ReopenPeriodInput,
   RoleInfo,
   StockFilter,
   Stocktake,
@@ -110,6 +116,16 @@ export interface ReportsApi {
   dashboard(): Promise<DashboardStats>;
 }
 
+export interface FiscalApi {
+  listYears(): Promise<FiscalYear[]>;
+  createYear(input: CreateFiscalYearInput): Promise<FiscalYear>;
+  createPeriod(fiscalYearId: string, input: CreateFiscalPeriodInput): Promise<FiscalPeriod>;
+  closePeriod(periodId: string): Promise<FiscalPeriod>;
+  reopenPeriod(periodId: string, input?: ReopenPeriodInput): Promise<FiscalPeriod>;
+  yearEndClose(fiscalYearId: string): Promise<FiscalYear>;
+  events(): Promise<FiscalEvent[]>;
+}
+
 export interface UsersApi {
   list(): Promise<AdminUser[]>;
   listRoles(): Promise<RoleInfo[]>;
@@ -124,5 +140,6 @@ export interface DataSource {
   warehouses: WarehousesApi;
   inventory: InventoryApi;
   reports: ReportsApi;
+  fiscal: FiscalApi;
   users: UsersApi;
 }

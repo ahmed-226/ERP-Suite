@@ -68,11 +68,18 @@ export type Permission = (typeof PERMISSIONS)[number];
 export const ROLE_CODES = ['ADMIN', 'ACCOUNTANT', 'STOREKEEPER', 'VIEWER'] as const;
 export type RoleCode = (typeof ROLE_CODES)[number];
 
-/** Chart-of-accounts codes the inventory/GL integration depends on. */
+/** Chart-of-accounts codes the inventory/GL integration and closing depend on. */
 export const SYSTEM_ACCOUNT_CODES = {
   inventory: '1200',
   accountsPayable: '2000',
+  retainedEarnings: '3100',
   salesRevenue: '4000',
   costOfGoodsSold: '5000',
   operatingExpenses: '5100',
 } as const;
+
+export const FISCAL_PERIOD_STATUSES = ['OPEN', 'CLOSED'] as const;
+export type FiscalPeriodStatus = (typeof FISCAL_PERIOD_STATUSES)[number];
+
+export const FISCAL_YEAR_STATUSES = ['OPEN', 'CLOSED'] as const;
+export type FiscalYearStatus = (typeof FISCAL_YEAR_STATUSES)[number];

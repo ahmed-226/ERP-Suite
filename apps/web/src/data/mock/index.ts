@@ -60,6 +60,15 @@ export function createMockDataSource(options: { latency?: number } = {}): DataSo
       inventoryAging: (filter) => store.inventoryAging(filter),
       dashboard: () => store.dashboard(),
     },
+    fiscal: {
+      listYears: () => store.listFiscalYears(),
+      createYear: (input) => store.createFiscalYear(input),
+      createPeriod: (fiscalYearId, input) => store.createFiscalPeriod(fiscalYearId, input),
+      closePeriod: (periodId) => store.closeFiscalPeriod(periodId),
+      reopenPeriod: (periodId, input) => store.reopenFiscalPeriod(periodId, input),
+      yearEndClose: (fiscalYearId) => store.yearEndClose(fiscalYearId),
+      events: () => store.listFiscalEvents(),
+    },
     users: {
       list: () => store.listUsers(),
       listRoles: () => store.listRoles(),

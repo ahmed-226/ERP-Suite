@@ -183,6 +183,7 @@ const accounts: SeedAccount[] = [
   { accountId: '44444444-0000-0000-0000-000000000004', companyId, accountCode: '1200', accountName: 'Inventory', accountType: 'ASSET', parentAccountId: null },
   { accountId: '44444444-0000-0000-0000-000000000005', companyId, accountCode: '2000', accountName: 'Accounts Payable', accountType: 'LIABILITY', parentAccountId: null },
   { accountId: '44444444-0000-0000-0000-000000000006', companyId, accountCode: '3000', accountName: "Owner's Equity", accountType: 'EQUITY', parentAccountId: null },
+  { accountId: '44444444-0000-0000-0000-00000000000a', companyId, accountCode: '3100', accountName: 'Retained Earnings', accountType: 'EQUITY', parentAccountId: '44444444-0000-0000-0000-000000000006' },
   { accountId: '44444444-0000-0000-0000-000000000007', companyId, accountCode: '4000', accountName: 'Sales Revenue', accountType: 'REVENUE', parentAccountId: null },
   { accountId: '44444444-0000-0000-0000-000000000008', companyId, accountCode: '5000', accountName: 'Cost of Goods Sold', accountType: 'EXPENSE', parentAccountId: null },
   { accountId: '44444444-0000-0000-0000-000000000009', companyId, accountCode: '5100', accountName: 'Operating Expenses', accountType: 'EXPENSE', parentAccountId: null },

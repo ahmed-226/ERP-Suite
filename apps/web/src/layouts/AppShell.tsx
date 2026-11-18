@@ -54,6 +54,11 @@ export function AppShell() {
           icon: <DatabaseOutlined />,
           label: 'Trial Balance',
         },
+        can('reports:read') && {
+          key: '/accounting/fiscal-periods',
+          icon: <AuditOutlined />,
+          label: 'Fiscal Periods',
+        },
       ].filter(Boolean) as MenuItems
     );
 

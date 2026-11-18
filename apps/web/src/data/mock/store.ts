@@ -10,12 +10,17 @@ import {
   type AdjustmentInput,
   type AuthUser,
   type CreateAccountInput,
+  type CreateFiscalPeriodInput,
+  type CreateFiscalYearInput,
   type CreateJournalInput,
   type CreateProductInput,
   type CreateStocktakeInput,
   type CreateWarehouseInput,
   type DashboardStats,
   type EntryType,
+  type FiscalEvent,
+  type FiscalPeriod,
+  type FiscalYear,
   type InventoryAgingFilter,
   type InventoryAgingReport,
   type InventoryMovementSummaryFilter,
@@ -35,6 +40,7 @@ import {
   type Product,
   type ProductFilter,
   type ReceiptInput,
+  type ReopenPeriodInput,
   type StockFilter,
   type Stocktake,
   type StocktakeLine,
@@ -104,6 +110,40 @@ interface StocktakeRow {
   lines: StocktakeLineRow[];
 }
 
+interface FiscalPeriodRow {
+  periodId: string;
+  fiscalYearId: string;
+  name: string;
+  periodNumber: number;
+  startDate: string;
+  endDate: string;
+  status: 'OPEN' | 'CLOSED';
+  closedAt: string | null;
+  closedBy: string | null;
+}
+
+interface FiscalYearRow {
+  fiscalYearId: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+  status: 'OPEN' | 'CLOSED';
+  closedAt: string | null;
+  closedBy: string | null;
+  closingEntryId: string | null;
+  createdAt: string;
+}
+
+interface FiscalEventRow {
+  eventId: string;
+  fiscalYearId: string | null;
+  periodId: string | null;
+  action: FiscalEvent['action'];
+  reason: string | null;
+  actorUserId: string;
+  createdAt: string;
+}
+
 const uid = (): string => globalThis.crypto.randomUUID();
 const today = (): string => new Date().toISOString().slice(0, 10);
 
@@ -130,12 +170,19 @@ export class MockStore {
   private journals: JournalEntry[];
   private users: { userId: string; roleCode: string; isActive: boolean }[];
   private stocktakes: StocktakeRow[];
+  private fiscalYears: FiscalYearRow[];
+  private fiscalPeriods: FiscalPeriodRow[];
+  private fiscalEvents: FiscalEventRow[];
 
   private currentUserId: string | null = null;
   private journalCounter = seed.journals.length;
 
   constructor(options: { latency?: number } = {}) {
     this.latency = options.latency ?? 0;
+
+    this.fiscalYears = [];
+    this.fiscalPeriods = [];
+    this.fiscalEvents = [];
 
     this.accounts = seed.accounts.map((a) => ({
       ...a,
@@ -327,6 +374,272 @@ export class MockStore {
   private requireActor(): string {
     if (!this.currentUserId) throw new DataError('UNAUTHENTICATED', 'Not signed in', 401);
     return this.currentUserId;
+  }
+
+  // ------------------------------------------------------------- fiscal
+
+  private assertPeriodOpen(date: string): void {
+    const closed = this.fiscalPeriods.find(
+      (p) => p.status === 'CLOSED' && p.startDate <= date && p.endDate >= date,
+    );
+    if (closed) {
+      throw new DataError(
+        'PERIOD_LOCKED',
+        `Date ${date} falls in closed period ${closed.name}`,
+        422,
+      );
+    }
+  }
+
+  private fiscalYearById(fiscalYearId: string): FiscalYearRow {
+    const year = this.fiscalYears.find((y) => y.fiscalYearId === fiscalYearId);
+    if (!year) throw new DataError('FISCAL_YEAR_NOT_FOUND', 'Fiscal year not found', 404);
+    return year;
+  }
+
+  private enrichFiscalPeriod(p: FiscalPeriodRow): FiscalPeriod {
+    return {
+      periodId: p.periodId,
+      fiscalYearId: p.fiscalYearId,
+      companyId: seed.company.companyId,
+      name: p.name,
+      periodNumber: p.periodNumber,
+      startDate: p.startDate,
+      endDate: p.endDate,
+      status: p.status,
+      closedAt: p.closedAt,
+      closedBy: p.closedBy,
+      closedByName: p.closedBy ? this.userName(p.closedBy) : null,
+    };
+  }
+
+  private enrichFiscalYear(y: FiscalYearRow): FiscalYear {
+    return {
+      fiscalYearId: y.fiscalYearId,
+      companyId: seed.company.companyId,
+      name: y.name,
+      startDate: y.startDate,
+      endDate: y.endDate,
+      status: y.status,
+      closedAt: y.closedAt,
+      closedBy: y.closedBy,
+      closedByName: y.closedBy ? this.userName(y.closedBy) : null,
+      periods: this.fiscalPeriods
+        .filter((p) => p.fiscalYearId === y.fiscalYearId)
+        .sort((a, b) => a.periodNumber - b.periodNumber)
+        .map((p) => this.enrichFiscalPeriod(p)),
+    };
+  }
+
+  async listFiscalYears(): Promise<FiscalYear[]> {
+    await this.wait();
+    return this.fiscalYears
+      .slice()
+      .sort((a, b) => b.startDate.localeCompare(a.startDate))
+      .map((y) => this.enrichFiscalYear(y));
+  }
+
+  async createFiscalYear(input: CreateFiscalYearInput): Promise<FiscalYear> {
+    await this.wait();
+    this.requireActor();
+    if (this.fiscalYears.some((y) => y.startDate <= input.endDate && y.endDate >= input.startDate)) {
+      throw new DataError('FISCAL_YEAR_OVERLAP', 'Fiscal year overlaps an existing year', 409);
+    }
+    if (this.fiscalYears.some((y) => y.name === input.name)) {
+      throw new DataError('DUPLICATE_FISCAL_YEAR', `Fiscal year ${input.name} already exists`, 409);
+    }
+    const year: FiscalYearRow = {
+      fiscalYearId: uid(),
+      name: input.name,
+      startDate: input.startDate,
+      endDate: input.endDate,
+      status: 'OPEN',
+      closedAt: null,
+      closedBy: null,
+      closingEntryId: null,
+      createdAt: new Date().toISOString(),
+    };
+    this.fiscalYears.push(year);
+    return this.enrichFiscalYear(year);
+  }
+
+  async createFiscalPeriod(fiscalYearId: string, input: CreateFiscalPeriodInput): Promise<FiscalPeriod> {
+    await this.wait();
+    this.requireActor();
+    const year = this.fiscalYearById(fiscalYearId);
+    if (input.startDate < year.startDate || input.endDate > year.endDate) {
+      throw new DataError('PERIOD_OUT_OF_YEAR', 'Period must fall within its fiscal year', 422);
+    }
+    const yearPeriods = this.fiscalPeriods.filter((p) => p.fiscalYearId === fiscalYearId);
+    if (yearPeriods.some((p) => p.periodNumber === input.periodNumber)) {
+      throw new DataError('DUPLICATE_PERIOD_NUMBER', 'Period number already exists in this year', 409);
+    }
+    if (yearPeriods.some((p) => p.startDate <= input.endDate && p.endDate >= input.startDate)) {
+      throw new DataError('FISCAL_PERIOD_OVERLAP', 'Period overlaps an existing period', 409);
+    }
+    const period: FiscalPeriodRow = {
+      periodId: uid(),
+      fiscalYearId,
+      name: input.name,
+      periodNumber: input.periodNumber,
+      startDate: input.startDate,
+      endDate: input.endDate,
+      status: 'OPEN',
+      closedAt: null,
+      closedBy: null,
+    };
+    this.fiscalPeriods.push(period);
+    return this.enrichFiscalPeriod(period);
+  }
+
+  async closeFiscalPeriod(periodId: string): Promise<FiscalPeriod> {
+    await this.wait();
+    const actor = this.requireActor();
+    const period = this.fiscalPeriods.find((p) => p.periodId === periodId);
+    if (!period) throw new DataError('PERIOD_NOT_FOUND', 'Fiscal period not found', 404);
+    if (period.status === 'CLOSED') {
+      throw new DataError('PERIOD_ALREADY_CLOSED', 'Fiscal period is already closed', 409);
+    }
+    period.status = 'CLOSED';
+    period.closedAt = new Date().toISOString();
+    period.closedBy = actor;
+    this.fiscalEvents.push({
+      eventId: uid(),
+      fiscalYearId: period.fiscalYearId,
+      periodId: period.periodId,
+      action: 'CLOSE_PERIOD',
+      reason: null,
+      actorUserId: actor,
+      createdAt: new Date().toISOString(),
+    });
+    return this.enrichFiscalPeriod(period);
+  }
+
+  async reopenFiscalPeriod(periodId: string, input: ReopenPeriodInput = {}): Promise<FiscalPeriod> {
+    await this.wait();
+    const actor = this.requireActor();
+    const period = this.fiscalPeriods.find((p) => p.periodId === periodId);
+    if (!period) throw new DataError('PERIOD_NOT_FOUND', 'Fiscal period not found', 404);
+    if (period.status === 'OPEN') {
+      throw new DataError('PERIOD_ALREADY_OPEN', 'Fiscal period is already open', 409);
+    }
+    const year = this.fiscalYearById(period.fiscalYearId);
+    if (year.status === 'CLOSED') {
+      throw new DataError('FISCAL_YEAR_CLOSED', 'Cannot reopen a period in a closed fiscal year', 409);
+    }
+    period.status = 'OPEN';
+    period.closedAt = null;
+    period.closedBy = null;
+    this.fiscalEvents.push({
+      eventId: uid(),
+      fiscalYearId: period.fiscalYearId,
+      periodId: period.periodId,
+      action: 'REOPEN_PERIOD',
+      reason: input.reason ?? null,
+      actorUserId: actor,
+      createdAt: new Date().toISOString(),
+    });
+    return this.enrichFiscalPeriod(period);
+  }
+
+  async listFiscalEvents(): Promise<FiscalEvent[]> {
+    await this.wait();
+    return this.fiscalEvents
+      .slice()
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, 100)
+      .map((e) => ({
+        eventId: e.eventId,
+        companyId: seed.company.companyId,
+        fiscalYearId: e.fiscalYearId,
+        periodId: e.periodId,
+        action: e.action,
+        reason: e.reason,
+        actorUserId: e.actorUserId,
+        actorName: this.userName(e.actorUserId),
+        createdAt: e.createdAt,
+      }));
+  }
+
+  async yearEndClose(fiscalYearId: string): Promise<FiscalYear> {
+    await this.wait();
+    const actor = this.requireActor();
+    const year = this.fiscalYearById(fiscalYearId);
+    if (year.status === 'CLOSED' || year.closingEntryId) {
+      throw new DataError('FISCAL_YEAR_CLOSED', 'Fiscal year is already closed', 409);
+    }
+    const periods = this.fiscalPeriods.filter((p) => p.fiscalYearId === fiscalYearId);
+    const openPeriods = periods.filter((p) => p.status !== 'CLOSED');
+    if (openPeriods.length > 0) {
+      throw new DataError('PERIODS_NOT_CLOSED', 'Close all periods in the fiscal year before year-end close', 422);
+    }
+    const retained = this.accountByCode(SYSTEM_ACCOUNT_CODES.retainedEarnings);
+
+    const balances = new Map<string, { accountType: 'REVENUE' | 'EXPENSE'; balance: Decimal }>();
+    for (const entry of this.journals) {
+      if (entry.status !== 'POSTED') continue;
+      if (entry.entryDate < year.startDate || entry.entryDate > year.endDate) continue;
+      if (entry.referenceType === 'YEAR_END_CLOSE') continue;
+      for (const line of entry.lines) {
+        const account = this.accountById(line.accountId);
+        if (account.accountType !== 'REVENUE' && account.accountType !== 'EXPENSE') continue;
+        const row = balances.get(account.accountId) ?? {
+          accountType: account.accountType,
+          balance: new Decimal(0),
+        };
+        if (row.accountType === 'REVENUE') {
+          row.balance = line.entryType === 'CREDIT' ? row.balance.plus(line.amount) : row.balance.minus(line.amount);
+        } else {
+          row.balance = line.entryType === 'DEBIT' ? row.balance.plus(line.amount) : row.balance.minus(line.amount);
+        }
+        balances.set(account.accountId, row);
+      }
+    }
+
+    const closingLines: { accountId: string; entryType: EntryType; amount: number; description: string | null }[] = [];
+    let netIncome = new Decimal(0);
+    for (const [accountId, row] of balances) {
+      if (row.balance.isZero()) continue;
+      if (row.accountType === 'REVENUE') {
+        closingLines.push({ accountId, entryType: 'DEBIT', amount: moneyToNumber(row.balance), description: 'Year-end close' });
+        netIncome = netIncome.plus(row.balance);
+      } else {
+        closingLines.push({ accountId, entryType: 'CREDIT', amount: moneyToNumber(row.balance), description: 'Year-end close' });
+        netIncome = netIncome.minus(row.balance);
+      }
+    }
+    if (!netIncome.isZero() || closingLines.length > 0) {
+      if (netIncome.isZero()) {
+        throw new DataError('INVALID_CLOSE', 'Closing balances do not produce a net result', 422);
+      }
+      if (netIncome.greaterThan(0)) {
+        closingLines.push({ accountId: retained.accountId, entryType: 'CREDIT', amount: moneyToNumber(netIncome), description: 'Year-end close' });
+      } else {
+        closingLines.push({ accountId: retained.accountId, entryType: 'DEBIT', amount: moneyToNumber(netIncome.abs()), description: 'Year-end close' });
+      }
+      const entry = this.createEntry({
+        entryDate: year.endDate,
+        referenceType: 'YEAR_END_CLOSE',
+        referenceId: year.fiscalYearId,
+        status: 'POSTED',
+        lines: closingLines,
+      });
+      year.closingEntryId = entry.entryId;
+    }
+
+    year.status = 'CLOSED';
+    year.closedAt = new Date().toISOString();
+    year.closedBy = actor;
+    this.fiscalEvents.push({
+      eventId: uid(),
+      fiscalYearId: year.fiscalYearId,
+      periodId: null,
+      action: 'YEAR_END_CLOSE',
+      reason: year.closingEntryId ? `Closing entry ${year.closingEntryId}` : 'No revenue/expense balances to close',
+      actorUserId: actor,
+      createdAt: new Date().toISOString(),
+    });
+    return this.enrichFiscalYear(year);
   }
 
   // ------------------------------------------------------------ accounts
@@ -593,6 +906,7 @@ export class MockStore {
   async createJournal(input: CreateJournalInput): Promise<JournalEntry> {
     await this.wait();
     this.requireActor();
+    this.assertPeriodOpen(input.entryDate);
     return this.createEntry({
       entryDate: input.entryDate,
       referenceType: input.referenceType ?? 'MANUAL',
@@ -614,7 +928,11 @@ export class MockStore {
     if (entry.status !== 'DRAFT') {
       throw new DataError('ENTRY_NOT_EDITABLE', 'Only draft entries can be edited');
     }
-    if (input.entryDate) entry.entryDate = input.entryDate;
+    this.assertPeriodOpen(entry.entryDate);
+    if (input.entryDate) {
+      this.assertPeriodOpen(input.entryDate);
+      entry.entryDate = input.entryDate;
+    }
     if (input.referenceType !== undefined) entry.referenceType = input.referenceType;
     if (input.referenceId !== undefined) entry.referenceId = input.referenceId;
     if (input.lines) {
@@ -638,6 +956,7 @@ export class MockStore {
     if (entry.status !== 'DRAFT') {
       throw new DataError('ENTRY_NOT_POSTABLE', 'Only draft entries can be posted');
     }
+    this.assertPeriodOpen(entry.entryDate);
     for (const line of entry.lines) this.assertAccountActive(this.accountById(line.accountId));
     this.assertBalanced(entry.lines);
     entry.status = 'POSTED';
@@ -656,11 +975,13 @@ export class MockStore {
       throw new DataError('ENTRY_ALREADY_VOID', 'Entry has already been reversed');
     }
     if (entry.status === 'DRAFT') {
+      this.assertPeriodOpen(entry.entryDate);
       entry.status = 'VOIDED';
       return entry;
     }
 
-    // Posted entries are never rewritten: post a mirror entry dated today.
+    // Posted entries are never rewritten: post a mirror reversal dated today.
+    this.assertPeriodOpen(today());
     const reversal = this.createEntry({
       entryDate: today(),
       referenceType: REVERSAL_REFERENCE_TYPE,
@@ -966,6 +1287,7 @@ export class MockStore {
   async receipt(input: ReceiptInput): Promise<InventoryTransaction> {
     await this.wait();
     this.requireActor();
+    this.assertPeriodOpen(today());
     const product = this.productById(input.productId);
     this.warehouseById(input.warehouseId);
 
@@ -1009,6 +1331,7 @@ export class MockStore {
   async issue(input: IssueInput): Promise<InventoryTransaction> {
     await this.wait();
     this.requireActor();
+    this.assertPeriodOpen(today());
     const product = this.productById(input.productId);
     this.warehouseById(input.warehouseId);
 
@@ -1052,6 +1375,7 @@ export class MockStore {
   async transfer(input: TransferInput): Promise<InventoryTransaction[]> {
     await this.wait();
     this.requireActor();
+    this.assertPeriodOpen(today());
     const product = this.productById(input.productId);
     this.warehouseById(input.fromWarehouseId);
     this.warehouseById(input.toWarehouseId);
@@ -1094,6 +1418,7 @@ export class MockStore {
   async adjust(input: AdjustmentInput): Promise<InventoryTransaction> {
     await this.wait();
     this.requireActor();
+    this.assertPeriodOpen(today());
     const product = this.productById(input.productId);
     this.warehouseById(input.warehouseId);
 
@@ -1227,6 +1552,7 @@ export class MockStore {
   async applyStocktake(stocktakeId: string): Promise<Stocktake> {
     await this.wait();
     const actor = this.requireActor();
+    this.assertPeriodOpen(today());
     const row = this.stocktakes.find((s) => s.stocktakeId === stocktakeId);
     if (!row) throw new DataError('STOCKTAKE_NOT_FOUND', 'Stocktake not found', 404);
     if (row.status !== 'DRAFT') {

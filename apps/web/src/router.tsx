@@ -15,6 +15,7 @@ import StockPage from '@/pages/stock';
 import MovementsPage from '@/pages/movements';
 import InventoryOperationsPage from '@/pages/operations';
 import StocktakesPage from '@/pages/stocktakes';
+import FiscalPeriodsPage from '@/pages/fiscal';
 import SettingsPage from '@/pages/settings';
 
 export const router = createBrowserRouter([
@@ -49,6 +50,10 @@ export const router = createBrowserRouter([
       {
         path: 'accounting/trial-balance',
         element: <TrialBalancePage />,
+      },
+      {
+        path: 'accounting/fiscal-periods',
+        element: <FiscalPeriodsPage />,
       },
 
       {

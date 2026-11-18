@@ -14,6 +14,7 @@ import {
 import { prisma } from '../../db/db';
 import { ApiError, notFound } from '../../lib/errors';
 import { requireAuth, requirePermission } from '../../middleware/auth';
+import { assertPeriodOpen } from '../fiscal/fiscal.service';
 import {
   applyStockDeltas,
   lockProductCosting,
@@ -175,6 +176,7 @@ inventoryRouter.post('/receipts', requirePermission('inventory:write'), async (r
   await assertWarehouseInCompany(companyId, input.warehouseId);
 
   const result = await withInventoryIdempotency(req, 'receipt', async (tx) => {
+    await assertPeriodOpen(tx, companyId, new Date().toISOString().slice(0, 10));
     // Moving average is company-wide: blend the received cost into the value of
     // all on-hand units before the stock delta lands. Locking the product first
     // keeps concurrent receipts from overwriting each other's blend.
@@ -240,6 +242,7 @@ inventoryRouter.post('/issues', requirePermission('inventory:write'), async (req
   await assertWarehouseInCompany(companyId, input.warehouseId);
 
   const result = await withInventoryIdempotency(req, 'issue', async (tx) => {
+    await assertPeriodOpen(tx, companyId, new Date().toISOString().slice(0, 10));
     const product = await tx.product.findUniqueOrThrow({
       where: { productId: input.productId },
       select: { averageCost: true },
@@ -289,6 +292,7 @@ inventoryRouter.post('/transfers', requirePermission('inventory:write'), async (
   await assertWarehouseInCompany(companyId, input.toWarehouseId);
 
   const result = await withInventoryIdempotency(req, 'transfer', async (tx) => {
+    await assertPeriodOpen(tx, companyId, new Date().toISOString().slice(0, 10));
     const product = await tx.product.findUniqueOrThrow({
       where: { productId: input.productId },
       select: { averageCost: true },
@@ -335,6 +339,7 @@ inventoryRouter.post('/adjustments', requirePermission('inventory:write'), async
   await assertWarehouseInCompany(companyId, input.warehouseId);
 
   const result = await withInventoryIdempotency(req, 'adjustment', async (tx) => {
+    await assertPeriodOpen(tx, companyId, new Date().toISOString().slice(0, 10));
     const product = await tx.product.findUniqueOrThrow({
       where: { productId: input.productId },
       select: { averageCost: true },
@@ -512,6 +517,7 @@ inventoryRouter.post(
     const stocktakeId = req.params.stocktakeId;
 
     const applied = await prisma.$transaction(async (tx) => {
+      await assertPeriodOpen(tx, companyId, new Date().toISOString().slice(0, 10));
       const stocktake = await tx.stocktake.findFirst({
         where: { stocktakeId, companyId },
         include: { lines: true, warehouse: { select: { code: true, name: true } } },
