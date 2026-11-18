@@ -1,4 +1,4 @@
-import { Card, DatePicker, Space, Statistic, Table, Typography } from 'antd';
+import { Card, Col, DatePicker, Row, Statistic, Table, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -47,25 +47,37 @@ export default function ProfitAndLossPage() {
         </Typography.Text>
       )}
       {report && (
-        <Space direction="vertical" size="large" style={{ width: '100%' }}>
-          <Space size="large" wrap>
-            <Card size="small"><Statistic title="Total revenue" value={formatMoney(report.totalRevenue)} /></Card>
-            <Card size="small"><Statistic title="Total expenses" value={formatMoney(report.totalExpenses)} /></Card>
-            <Card size="small">
-              <Statistic
-                title="Net income"
-                value={formatMoney(report.netIncome)}
-                valueStyle={{ color: report.netIncome >= 0 ? '#3f8600' : '#cf1322' }}
-              />
-            </Card>
-          </Space>
-          <Card title="Revenue">
+        <>
+          <Row gutter={16} style={{ marginBottom: 16 }}>
+            <Col xs={24} sm={8}>
+              <Card>
+                <Statistic title="Total revenue" value={report.totalRevenue} precision={2} prefix="$" />
+              </Card>
+            </Col>
+            <Col xs={24} sm={8}>
+              <Card>
+                <Statistic title="Total expenses" value={report.totalExpenses} precision={2} prefix="$" />
+              </Card>
+            </Col>
+            <Col xs={24} sm={8}>
+              <Card>
+                <Statistic
+                  title="Net income"
+                  value={report.netIncome}
+                  precision={2}
+                  prefix="$"
+                  valueStyle={{ color: report.netIncome >= 0 ? '#3f8600' : '#cf1322' }}
+                />
+              </Card>
+            </Col>
+          </Row>
+          <Card title="Revenue" style={{ marginBottom: 16 }}>
             <Table<StatementLine> rowKey="accountId" size="small" columns={columns} dataSource={report.revenue} pagination={false} />
           </Card>
           <Card title="Expenses">
             <Table<StatementLine> rowKey="accountId" size="small" columns={columns} dataSource={report.expenses} pagination={false} />
           </Card>
-        </Space>
+        </>
       )}
     </>
   );
