@@ -184,20 +184,36 @@ Because every value-changing movement posts, the `1200` Inventory balance
 reconciles to the valuation report total. The integration test asserts this on a
 fresh company/product; seeded data is posted the same way.
 
-## 10a. Inventory valuation report
+## 10a. Inventory reports (valuation, movement summary, aging)
 
-The report multiplies each product's company-wide on-hand quantity by its
-running `averageCost`:
+**Valuation** values stock per **(product, warehouse)** at the product's company-wide running `averageCost` and reconciles it to the posted inventory account (`1200`):
 
 ```
-value(product) = Σ stock.quantityOnHand × product.averageCost
-report.totalValue = Σ value(product)
+value(row) = stock.quantityOnHand × product.averageCost
+report.totalValue = Σ value(rows with quantityOnHand ≠ 0)
+report.difference = totalValue - inventoryAccountBalance
 ```
 
-`GET /reports/inventory-valuation` returns the rows and total used by the
-Inventory → Valuation page. Because receipts, issues and adjustments all carry
-the same valuation cost, the total reconciles to the `1200` Inventory account
-once every stock movement has posted its GL entry.
+`GET /reports/inventory-valuation` returns `{ rows, totalValue, inventoryAccountBalance, difference }` for the Inventory → Valuation page. Because receipts, issues and adjustments all carry the same valuation cost, `difference` is zero once every stock movement has posted its GL entry.
+
+**Movement summary** (`GET /reports/inventory-movement-summary?from=&to=`) aggregates movements by month (`YYYY-MM`) and `movementType`, reporting movement count, quantity in/out, and total movement value for the selected period.
+
+**Slow-moving / aging** (`GET /reports/inventory-aging?asOf=`) lists on-hand stock per (product, warehouse) with `lastMovementAt` and `daysSinceLastMovement` relative to the `asOf` date (defaults to today), ordered from slowest-moving.
+
+## 10b. Stocktake / cycle count
+
+```mermaid
+flowchart TD
+    A["Create stocktake (warehouse + counted lines)"] --> B["Draft captures system quantities<br/>and variances per product"]
+    B --> C{"Apply draft?"}
+    C -- "yes" --> D["For each line with variance ≠ 0:<br/>post ADJUSTMENT movement + GL<br/>(same gain/loss rules as §10)"]
+    D --> E["Stocktake becomes APPLIED<br/>(appliedBy/appliedAt recorded)"]
+    C -- "no" --> F["Remains DRAFT"]
+```
+
+- Creating a count sheet records `systemQuantity` at capture time, the counted quantity, and the variance (`counted - system`) for each product in the selected warehouse.
+- Only `DRAFT` stocktakes can be applied (`409 STOCKTAKE_NOT_DRAFT` otherwise). Applying posts variances as `ADJUSTMENT` movements and balanced GL entries (write-off: DR `5100` / CR `1200`; gain: DR `1200` / CR `5100`; zero-value variances post no journal), with the stocktake as the adjustment reference — no direct ledger or stock edits.
+- Stocktakes are managed from Inventory → Stocktakes (`GET/POST /inventory/stocktakes`, `POST /inventory/stocktakes/:id/apply`).
 
 ## 11. Assigning a role (Settings)
 
@@ -212,6 +228,9 @@ flowchart TD
 ## 12. Reports
 
 - **Trial balance** — aggregates lines of `POSTED` entries in a date range, grouped by account; the net column sums to zero across all accounts; exportable as CSV.
+- **Inventory valuation** — per-(product, warehouse) on-hand value at running `averageCost`, reconciled to the posted `1200` Inventory account balance (`difference`).
+- **Inventory movement summary** — movement counts and in/out/value totals by month and movement type for a selected date range.
+- **Inventory aging / slow-moving** — on-hand stock with last movement time and days since last movement as of a reference date.
 - **Dashboard** — counts (accounts, products, journals, stock units), draft/posted split, low-stock items (`quantityOnHand ≤ reorderThreshold`) and the five most recent journals.
 
 ## Invariants enforced by the mock store (summary)

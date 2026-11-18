@@ -15,10 +15,13 @@ erDiagram
     COMPANY ||--o{ PRODUCT : "scopes"
     COMPANY ||--o{ WAREHOUSE : "scopes"
     COMPANY ||--o{ JOURNAL_ENTRY : "scopes"
+    COMPANY ||--o{ STOCKTAKE : "scopes"
 
     USER }o--|| ROLE : "assigned role"
     USER ||--o{ JOURNAL_ENTRY : "created by"
     USER ||--o{ INVENTORY_TRANSACTION : "recorded by"
+    USER ||--o{ STOCKTAKE : "creates"
+    USER |o--o{ STOCKTAKE : "applies"
 
     ACCOUNT |o--o{ ACCOUNT : "parent of"
 
@@ -30,6 +33,10 @@ erDiagram
     WAREHOUSE ||--o{ INVENTORY_STOCK : "holds"
     PRODUCT ||--o{ INVENTORY_TRANSACTION : "moved in"
     WAREHOUSE ||--o{ INVENTORY_TRANSACTION : "location of"
+
+    WAREHOUSE ||--o{ STOCKTAKE : "counted in"
+    STOCKTAKE ||--|{ STOCKTAKE_LINE : "contains"
+    PRODUCT ||--o{ STOCKTAKE_LINE : "counted as"
 
     COMPANY {
         string companyId PK
@@ -99,7 +106,7 @@ erDiagram
         string entryNumber UK "JE-0001 style counter"
         date entryDate
         string status "DRAFT | POSTED | VOIDED"
-        string referenceType "MANUAL | INVENTORY_RECEIPT | SALES_ISSUE | REVERSAL"
+        string referenceType "MANUAL | INVENTORY_RECEIPT | SALES_ISSUE | ADJUSTMENT | REVERSAL"
         string referenceId FK "movement id, or reversed entry id for REVERSAL"
         string createdBy FK
         string postedAt
@@ -111,6 +118,25 @@ erDiagram
         string entryType "DEBIT | CREDIT"
         decimal amount "always positive"
         string description
+    }
+    STOCKTAKE {
+        string stocktakeId PK
+        string companyId FK
+        string warehouseId FK
+        string status "DRAFT | APPLIED | CANCELLED"
+        string notes
+        string createdBy FK
+        string appliedBy FK
+        datetime appliedAt
+        datetime createdAt
+    }
+    STOCKTAKE_LINE {
+        string lineId PK
+        string stocktakeId FK
+        string productId FK
+        int systemQuantity "captured at creation"
+        int countedQuantity
+        int variance "counted - system"
     }
 ```
 
@@ -128,20 +154,25 @@ erDiagram
 | `INVENTORY_TRANSACTION` | `movements` list | Append-only movement ledger. Signed quantity: positive = in, negative = out. | Rows are never updated or deleted — new facts are new rows. |
 | `JOURNAL_ENTRY` | `journals` list | Double-entry document with a draft → posted lifecycle; posted entries are reversed, never rewritten. | ≥ 2 lines with positive amounts; `POSTED` requires Σ debits = Σ credits; posted entries are immutable; voiding one posts a linked `REVERSAL` entry. |
 | `JOURNAL_ENTRY_LINE` | entry lines | One debit or credit against an account. | Amount always positive; side is `DEBIT` or `CREDIT`. |
+| `STOCKTAKE` | `stocktakes` state | Warehouse count sheet (cycle/physical count) with a draft → applied lifecycle. | Draft captures system quantities, counted quantities and variances per product; only `DRAFT` can be applied. Applying posts `ADJUSTMENT` movements and balanced GL entries for non-zero variances (auditable, no direct ledger edits) and records `appliedBy`/`appliedAt`. |
+| `STOCKTAKE_LINE` | stocktake lines | One counted product line within a stocktake. | Holds captured `systemQuantity`, `countedQuantity` and `variance` (`counted - system`); one line per (stocktake, product). |
 
 ## Relationships
 
 | From | To | Cardinality | Meaning |
 | --- | --- | --- | --- |
-| `COMPANY` | `USER` / `ROLE` / `ACCOUNT` / `PRODUCT` / `WAREHOUSE` / `JOURNAL_ENTRY` | 1 : N | Tenant scoping — every record belongs to one company. |
+| `COMPANY` | `USER` / `ROLE` / `ACCOUNT` / `PRODUCT` / `WAREHOUSE` / `JOURNAL_ENTRY` / `STOCKTAKE` | 1 : N | Tenant scoping — every record belongs to one company. |
 | `USER` | `ROLE` | N : 1 | Each user has exactly one role in v1 (assignable in Settings). |
-| `USER` | `JOURNAL_ENTRY`, `INVENTORY_TRANSACTION` | 1 : N | Audit: who created/recorded the record (`createdBy` + display name). |
+| `USER` | `JOURNAL_ENTRY`, `INVENTORY_TRANSACTION`, `STOCKTAKE` | 1 : N | Audit: who created/recorded the record (`createdBy` + display name) and, for stocktakes, who applied it. |
 | `ACCOUNT` | `ACCOUNT` | 0..1 parent : N children | Chart-of-accounts hierarchy. |
 | `JOURNAL_ENTRY` | `JOURNAL_ENTRY_LINE` | 1 : 2..N | A journal always has at least two lines. |
 | `JOURNAL_ENTRY_LINE` | `ACCOUNT` | N : 1 | Every line posts to exactly one ledger account. |
-| `JOURNAL_ENTRY` | `INVENTORY_TRANSACTION` | 0..1 : 1 | A goods receipt or sales issue auto-generates one POSTED entry referencing the movement (`referenceType` + `referenceId`). |
+| `JOURNAL_ENTRY` | `INVENTORY_TRANSACTION` | 0..1 : 1 | Inventory operations (receipts, issues, adjustments/stocktake variances) auto-generate a POSTED entry referencing the movement (`referenceType` + `referenceId`). |
 | `PRODUCT` + `WAREHOUSE` | `INVENTORY_STOCK` | 1 : N each | Stock is the join between a product and a warehouse — one row per pair. |
 | `PRODUCT` / `WAREHOUSE` | `INVENTORY_TRANSACTION` | 1 : N | Each movement touches exactly one product in exactly one warehouse. |
+| `WAREHOUSE` | `STOCKTAKE` | 1 : N | Each stocktake counts one warehouse. |
+| `STOCKTAKE` | `STOCKTAKE_LINE` | 1 : 1..N | A stocktake records one or more counted product lines. |
+| `PRODUCT` | `STOCKTAKE_LINE` | 1 : N | Each line captures the count for one product. |
 
 ## Integration account mapping
 
