@@ -136,3 +136,70 @@ export interface DashboardStats {
   recentJournals: JournalEntry[];
   lowStock: InventoryStock[];
 }
+
+export const financialStatementFilterSchema = z.object({
+  from: isoDateSchema.default('0001-01-01'),
+  to: isoDateSchema.default('9999-12-31'),
+});
+
+export type FinancialStatementFilter = z.infer<typeof financialStatementFilterSchema>;
+
+export const balanceSheetFilterSchema = z.object({
+  asOf: isoDateSchema,
+});
+
+export type BalanceSheetFilter = z.infer<typeof balanceSheetFilterSchema>;
+
+export interface StatementLine {
+  accountId: string;
+  accountCode: string;
+  accountName: string;
+  amount: number;
+}
+
+export interface ProfitAndLossReport {
+  from: string;
+  to: string;
+  revenue: StatementLine[];
+  expenses: StatementLine[];
+  totalRevenue: number;
+  totalExpenses: number;
+  netIncome: number;
+}
+
+export interface BalanceSheetSection {
+  lines: StatementLine[];
+  total: number;
+}
+
+export interface BalanceSheetReport {
+  asOf: string;
+  assets: BalanceSheetSection;
+  liabilities: BalanceSheetSection;
+  equity: BalanceSheetSection;
+  totalLiabilitiesAndEquity: number;
+  balanced: boolean;
+  difference: number;
+}
+
+export interface CashFlowLine {
+  label: string;
+  amount: number;
+  referenceType?: string | null;
+}
+
+export interface CashFlowSection {
+  lines: CashFlowLine[];
+  total: number;
+}
+
+export interface CashFlowStatementReport {
+  from: string;
+  to: string;
+  openingCash: number;
+  closingCash: number;
+  netChange: number;
+  operating: CashFlowSection;
+  investing: CashFlowSection;
+  financing: CashFlowSection;
+}

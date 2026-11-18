@@ -7,6 +7,9 @@ import type {
   AdminUser,
   AssignRoleInput,
   AuthUser,
+  BalanceSheetFilter,
+  BalanceSheetReport,
+  CashFlowStatementReport,
   CreateAccountInput,
   CreateFiscalPeriodInput,
   CreateFiscalYearInput,
@@ -15,6 +18,7 @@ import type {
   CreateStocktakeInput,
   CreateWarehouseInput,
   DashboardStats,
+  FinancialStatementFilter,
   FiscalEvent,
   FiscalYear,
   FiscalPeriod,
@@ -33,6 +37,7 @@ import type {
   MovementFilter,
   Product,
   ProductFilter,
+  ProfitAndLossReport,
   ReceiptInput,
   ReopenPeriodInput,
   RoleInfo,
@@ -111,6 +116,9 @@ export interface InventoryApi {
 export interface ReportsApi {
   trialBalance(filter: TrialBalanceFilter): Promise<TrialBalanceRow[]>;
   accountLedger(accountId: string, filter: AccountLedgerFilter): Promise<AccountLedgerReport>;
+  profitAndLoss(filter: FinancialStatementFilter): Promise<ProfitAndLossReport>;
+  balanceSheet(filter: BalanceSheetFilter): Promise<BalanceSheetReport>;
+  cashFlow(filter: FinancialStatementFilter): Promise<CashFlowStatementReport>;
   inventoryValuation(): Promise<InventoryValuationReport>;
   inventoryMovementSummary(
     filter: InventoryMovementSummaryFilter,

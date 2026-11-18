@@ -3,6 +3,8 @@ import {
   Decimal,
   SYSTEM_ACCOUNT_CODES,
   accountLedgerFilterSchema,
+  balanceSheetFilterSchema,
+  financialStatementFilterSchema,
   inventoryAgingFilterSchema,
   inventoryMovementSummaryFilterSchema,
   money,
@@ -361,6 +363,230 @@ reportRouter.get(
     });
   },
 );
+
+/** GET /reports/profit-and-loss?from=&to= — posted revenue/expense performance (excludes year-end closing entries). */
+reportRouter.get('/profit-and-loss', requirePermission('reports:read'), async (req, res) => {
+  const companyId = req.user!.companyId;
+  const { from, to } = financialStatementFilterSchema.parse(req.query);
+  const lines = await prisma.journalEntryLine.findMany({
+    where: {
+      entry: {
+        companyId,
+        status: 'POSTED',
+        entryDate: { gte: new Date(`${from}T00:00:00.000Z`), lte: new Date(`${to}T00:00:00.000Z`) },
+        referenceType: { not: 'YEAR_END_CLOSE' },
+      },
+      account: { companyId, accountType: { in: ['REVENUE', 'EXPENSE'] } },
+    },
+    select: {
+      entryType: true,
+      amount: true,
+      account: { select: { accountId: true, accountCode: true, accountName: true, accountType: true } },
+    },
+  });
+
+  const revenueMap = new Map<string, { accountId: string; accountCode: string; accountName: string; amount: Decimal }>();
+  const expenseMap = new Map<string, { accountId: string; accountCode: string; accountName: string; amount: Decimal }>();
+  for (const line of lines) {
+    const map = line.account.accountType === 'REVENUE' ? revenueMap : expenseMap;
+    const row = map.get(line.account.accountId) ?? {
+      accountId: line.account.accountId,
+      accountCode: line.account.accountCode,
+      accountName: line.account.accountName,
+      amount: new Decimal(0),
+    };
+    const amount = line.amount.toString();
+    if (line.account.accountType === 'REVENUE') {
+      row.amount = line.entryType === 'CREDIT' ? row.amount.plus(amount) : row.amount.minus(amount);
+    } else {
+      row.amount = line.entryType === 'DEBIT' ? row.amount.plus(amount) : row.amount.minus(amount);
+    }
+    map.set(line.account.accountId, row);
+  }
+
+  const toRows = (map: typeof revenueMap) =>
+    [...map.values()]
+      .map((r) => ({ accountId: r.accountId, accountCode: r.accountCode, accountName: r.accountName, amount: moneyToNumber(r.amount) }))
+      .filter((r) => r.amount !== 0)
+      .sort((a, b) => a.accountCode.localeCompare(b.accountCode));
+  const revenue = toRows(revenueMap);
+  const expenses = toRows(expenseMap);
+  const totalRevenue = moneyToNumber(sumMoney(revenue.map((r) => r.amount)));
+  const totalExpenses = moneyToNumber(sumMoney(expenses.map((r) => r.amount)));
+  res.status(200).json({
+    from,
+    to,
+    revenue,
+    expenses,
+    totalRevenue,
+    totalExpenses,
+    netIncome: moneyToNumber(money(totalRevenue).minus(totalExpenses)),
+  });
+});
+
+/** GET /reports/balance-sheet?asOf= — assets, liabilities, equity and current earnings as of date. */
+reportRouter.get('/balance-sheet', requirePermission('reports:read'), async (req, res) => {
+  const companyId = req.user!.companyId;
+  const { asOf } = balanceSheetFilterSchema.parse(req.query);
+  const lines = await prisma.journalEntryLine.findMany({
+    where: {
+      entry: { companyId, status: 'POSTED', entryDate: { lte: new Date(`${asOf}T00:00:00.000Z`) } },
+    },
+    select: {
+      entryType: true,
+      amount: true,
+      account: { select: { accountId: true, accountCode: true, accountName: true, accountType: true } },
+    },
+  });
+
+  const byAccount = new Map<string, { accountId: string; accountCode: string; accountName: string; accountType: string; debit: Decimal; credit: Decimal }>();
+  for (const line of lines) {
+    const row = byAccount.get(line.account.accountId) ?? {
+      accountId: line.account.accountId,
+      accountCode: line.account.accountCode,
+      accountName: line.account.accountName,
+      accountType: line.account.accountType,
+      debit: new Decimal(0),
+      credit: new Decimal(0),
+    };
+    const amount = line.amount.toString();
+    if (line.entryType === 'DEBIT') row.debit = row.debit.plus(amount);
+    else row.credit = row.credit.plus(amount);
+    byAccount.set(line.account.accountId, row);
+  }
+
+  const sectionRows = (types: string[], creditNormal: boolean) =>
+    [...byAccount.values()]
+      .filter((a) => types.includes(a.accountType))
+      .map((a) => ({
+        accountId: a.accountId,
+        accountCode: a.accountCode,
+        accountName: a.accountName,
+        amount: moneyToNumber(creditNormal ? a.credit.minus(a.debit) : a.debit.minus(a.credit)),
+      }))
+      .filter((r) => r.amount !== 0)
+      .sort((a, b) => a.accountCode.localeCompare(b.accountCode));
+
+  const assets = sectionRows(['ASSET'], false);
+  const liabilities = sectionRows(['LIABILITY'], true);
+  const equityAccounts = sectionRows(['EQUITY'], true);
+
+  // Current earnings = net income from revenue/expense balances as-of (0 after year-end close).
+  let revenueNet = new Decimal(0);
+  let expenseNet = new Decimal(0);
+  for (const a of byAccount.values()) {
+    if (a.accountType === 'REVENUE') revenueNet = revenueNet.plus(a.credit.minus(a.debit));
+    if (a.accountType === 'EXPENSE') expenseNet = expenseNet.plus(a.debit.minus(a.credit));
+  }
+  const currentEarnings = moneyToNumber(revenueNet.minus(expenseNet));
+  const equityLines = currentEarnings !== 0
+    ? [...equityAccounts, { accountId: 'current-earnings', accountCode: '', accountName: 'Current Year Earnings', amount: currentEarnings }]
+        .sort((a, b) => a.accountCode.localeCompare(b.accountCode) || a.accountName.localeCompare(b.accountName))
+    : equityAccounts;
+
+  const totalAssets = moneyToNumber(sumMoney(assets.map((r) => r.amount)));
+  const totalLiabilities = moneyToNumber(sumMoney(liabilities.map((r) => r.amount)));
+  const totalEquity = moneyToNumber(sumMoney(equityLines.map((r) => r.amount)));
+  const totalLiabilitiesAndEquity = moneyToNumber(money(totalLiabilities).plus(totalEquity));
+  const difference = moneyToNumber(money(totalAssets).minus(totalLiabilitiesAndEquity));
+  res.status(200).json({
+    asOf,
+    assets: { lines: assets, total: totalAssets },
+    liabilities: { lines: liabilities, total: totalLiabilities },
+    equity: { lines: equityLines, total: totalEquity },
+    totalLiabilitiesAndEquity,
+    balanced: difference === 0,
+    difference,
+  });
+});
+
+/** GET /reports/cash-flow?from=&to= — cash movement summary by operating/investing/financing activity. */
+reportRouter.get('/cash-flow', requirePermission('reports:read'), async (req, res) => {
+  const companyId = req.user!.companyId;
+  const { from, to } = financialStatementFilterSchema.parse(req.query);
+
+  const accounts = await prisma.chartOfAccount.findMany({
+    where: { companyId },
+    select: { accountId: true, accountCode: true, accountType: true, parentAccountId: true },
+  });
+  const byId = new Map(accounts.map((a) => [a.accountId, a]));
+  // Cash & cash equivalents: 1000 subtree (Cash and Bank and children like Petty Cash).
+  const cashIds = new Set<string>();
+  const root1000 = accounts.find((a) => a.accountCode === '1000');
+  if (root1000) {
+    cashIds.add(root1000.accountId);
+    for (const a of accounts) {
+      if (a.parentAccountId === root1000.accountId) cashIds.add(a.accountId);
+    }
+  } else {
+    for (const a of accounts) if (a.accountCode === '1010') cashIds.add(a.accountId);
+  }
+
+  const fromDate = new Date(`${from}T00:00:00.000Z`);
+  const toDate = new Date(`${to}T00:00:00.000Z`);
+  const entries = await prisma.journalEntry.findMany({
+    where: { companyId, status: 'POSTED', entryDate: { lte: toDate } },
+    select: {
+      entryId: true,
+      entryDate: true,
+      referenceType: true,
+      lines: { select: { accountId: true, entryType: true, amount: true } },
+    },
+    orderBy: { entryDate: 'asc' },
+  });
+
+  let openingCash = new Decimal(0);
+  const operating: { label: string; amount: number; referenceType?: string | null }[] = [];
+  const investing: { label: string; amount: number; referenceType?: string | null }[] = [];
+  const financing: { label: string; amount: number; referenceType?: string | null }[] = [];
+
+  const classify = (entryLines: typeof entries[number]['lines']): 'operating' | 'investing' | 'financing' => {
+    const nonCash = entryLines
+      .filter((l) => !cashIds.has(l.accountId))
+      .map((l) => byId.get(l.accountId))
+      .filter((a): a is NonNullable<typeof a> => !!a);
+    if (nonCash.some((a) => a.accountType === 'EQUITY')) return 'financing';
+    if (nonCash.some((a) => a.accountType === 'REVENUE' || a.accountType === 'EXPENSE' || a.accountType === 'LIABILITY')) return 'operating';
+    if (nonCash.some((a) => a.accountType === 'ASSET')) return 'operating';
+    return 'investing';
+  };
+
+  for (const entry of entries) {
+    let cashDelta = new Decimal(0);
+    for (const line of entry.lines) {
+      if (!cashIds.has(line.accountId)) continue;
+      const amount = line.amount.toString();
+      cashDelta = line.entryType === 'DEBIT' ? cashDelta.plus(amount) : cashDelta.minus(amount);
+    }
+    if (cashDelta.isZero()) continue;
+    if (entry.entryDate < fromDate) {
+      openingCash = openingCash.plus(cashDelta);
+      continue;
+    }
+    const bucket = classify(entry.lines);
+    const item = { label: entry.referenceType ?? 'Journal entry', amount: moneyToNumber(cashDelta), referenceType: entry.referenceType };
+    if (bucket === 'operating') operating.push(item);
+    else if (bucket === 'financing') financing.push(item);
+    else investing.push(item);
+  }
+
+  const sumItems = (items: { amount: number }[]) => moneyToNumber(sumMoney(items.map((i) => i.amount)));
+  const operatingTotal = sumItems(operating);
+  const investingTotal = sumItems(investing);
+  const financingTotal = sumItems(financing);
+  const netChange = moneyToNumber(money(operatingTotal).plus(investingTotal).plus(financingTotal));
+  const closingCash = moneyToNumber(openingCash.plus(netChange));
+  res.status(200).json({
+    from,
+    to,
+    openingCash: moneyToNumber(openingCash),
+    closingCash,
+    netChange,
+    operating: { lines: operating, total: operatingTotal },
+    investing: { lines: investing, total: investingTotal },
+    financing: { lines: financing, total: financingTotal },
+  });
+});
 
 /** GET /reports/dashboard — counters + recent journals + low stock. */
 reportRouter.get('/dashboard', requirePermission('reports:read'), async (req, res) => {

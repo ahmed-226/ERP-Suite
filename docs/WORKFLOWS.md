@@ -236,6 +236,9 @@ flowchart TD
 
 - **Trial balance** — aggregates lines of `POSTED` entries in a date range, grouped by account; the net column sums to zero across all accounts; exportable as CSV. Each account drills into the account ledger.
 - **Account ledger / general ledger detail** — per-account posted lines for a date range with opening balance, running balance, and closing balance (`GET /reports/account-ledger/:accountId`). From a ledger line you can open the journal and follow its source document reference (e.g. reversal, inventory movement, fiscal close) in ≤ 3 clicks from the trial balance.
+- **Profit & Loss** — revenue and expense performance for a date range derived from posted journals (excluding year-end closing entries). Net income = total revenue − total expenses (`GET /reports/profit-and-loss`).
+- **Balance Sheet** — assets, liabilities, equity and current year earnings as of a date derived from posted journals, including closing-entry effects so retained earnings reflects closed periods (`GET /reports/balance-sheet`).
+- **Cash Flow Statement** — cash and cash equivalents movement for a date range derived from posted journal activity, summarized by operating/investing/financing buckets with opening/closing cash (`GET /reports/cash-flow`).
 - **Inventory valuation** — per-(product, warehouse) on-hand value at running `averageCost`, reconciled to the posted `1200` Inventory account balance (`difference`).
 - **Inventory movement summary** — movement counts and in/out/value totals by month and movement type for a selected date range.
 - **Inventory aging / slow-moving** — on-hand stock with last movement time and days since last movement as of a reference date.

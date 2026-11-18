@@ -12,6 +12,9 @@ import JournalEditorPage from '@/pages/journals/JournalEditorPage';
 import JournalDetailPage from '@/pages/journals/JournalDetailPage';
 import TrialBalancePage from '@/pages/trialBalance';
 import AccountLedgerPage from '@/pages/ledger';
+import ProfitAndLossPage from '@/pages/profitAndLoss';
+import BalanceSheetPage from '@/pages/balanceSheet';
+import CashFlowPage from '@/pages/cashFlow';
 import InventoryValuationPage from '@/pages/inventoryValuation';
 import StockPage from '@/pages/stock';
 import MovementsPage from '@/pages/movements';
@@ -60,6 +63,18 @@ export const router = createBrowserRouter([
       {
         path: 'accounting/ledger/:accountId',
         element: <AccountLedgerPage />,
+      },
+      {
+        path: 'accounting/profit-and-loss',
+        element: <ProfitAndLossPage />,
+      },
+      {
+        path: 'accounting/balance-sheet',
+        element: <BalanceSheetPage />,
+      },
+      {
+        path: 'accounting/cash-flow',
+        element: <CashFlowPage />,
       },
       {
         path: 'accounting/fiscal-periods',

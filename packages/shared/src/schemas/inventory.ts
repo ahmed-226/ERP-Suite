@@ -1,7 +1,6 @@
 import { z } from 'zod';
 import {
   MOVEMENT_TYPES,
-  STOCKTAKE_STATUSES,
   type MovementType,
   type StocktakeStatus,
 } from '../constants';
