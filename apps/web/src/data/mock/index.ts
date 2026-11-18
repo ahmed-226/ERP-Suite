@@ -56,6 +56,9 @@ export function createMockDataSource(options: { latency?: number } = {}): DataSo
     reports: {
       trialBalance: (filter) => store.trialBalance(filter),
       accountLedger: (accountId, filter) => store.accountLedger(accountId, filter),
+      profitAndLoss: (filter) => store.profitAndLoss(filter),
+      balanceSheet: (filter) => store.balanceSheet(filter),
+      cashFlow: (filter) => store.cashFlow(filter),
       inventoryValuation: () => store.inventoryValuation(),
       inventoryMovementSummary: (filter) => store.inventoryMovementSummary(filter),
       inventoryAging: (filter) => store.inventoryAging(filter),

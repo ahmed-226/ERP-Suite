@@ -7,6 +7,9 @@ import type {
   AdminUser,
   AssignRoleInput,
   AuthUser,
+  BalanceSheetFilter,
+  BalanceSheetReport,
+  CashFlowStatementReport,
   CreateAccountInput,
   CreateFiscalPeriodInput,
   CreateFiscalYearInput,
@@ -15,6 +18,7 @@ import type {
   CreateStocktakeInput,
   CreateWarehouseInput,
   DashboardStats,
+  FinancialStatementFilter,
   FiscalEvent,
   FiscalPeriod,
   FiscalYear,
@@ -33,6 +37,7 @@ import type {
   MovementFilter,
   Product,
   ProductFilter,
+  ProfitAndLossReport,
   ReceiptInput,
   ReopenPeriodInput,
   RoleInfo,
@@ -181,6 +186,12 @@ export function createHttpDataSource(
         get<TrialBalanceRow[]>('/reports/trial-balance', { from: filter.from, to: filter.to }),
       accountLedger: (accountId: string, filter: AccountLedgerFilter) =>
         get<AccountLedgerReport>(`/reports/account-ledger/${accountId}`, { from: filter.from, to: filter.to }),
+      profitAndLoss: (filter: FinancialStatementFilter) =>
+        get<ProfitAndLossReport>('/reports/profit-and-loss', { from: filter.from, to: filter.to }),
+      balanceSheet: (filter: BalanceSheetFilter) =>
+        get<BalanceSheetReport>('/reports/balance-sheet', { asOf: filter.asOf }),
+      cashFlow: (filter: FinancialStatementFilter) =>
+        get<CashFlowStatementReport>('/reports/cash-flow', { from: filter.from, to: filter.to }),
       inventoryValuation: () => get<InventoryValuationReport>('/reports/inventory-valuation'),
       inventoryMovementSummary: (filter: InventoryMovementSummaryFilter) =>
         get<InventoryMovementSummaryReport>('/reports/inventory-movement-summary', {

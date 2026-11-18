@@ -55,6 +55,21 @@ export function AppShell() {
           label: 'Trial Balance',
         },
         can('reports:read') && {
+          key: '/accounting/profit-and-loss',
+          icon: <ProfileOutlined />,
+          label: 'Profit & Loss',
+        },
+        can('reports:read') && {
+          key: '/accounting/balance-sheet',
+          icon: <BankOutlined />,
+          label: 'Balance Sheet',
+        },
+        can('reports:read') && {
+          key: '/accounting/cash-flow',
+          icon: <SwapOutlined />,
+          label: 'Cash Flow',
+        },
+        can('reports:read') && {
           key: '/accounting/fiscal-periods',
           icon: <AuditOutlined />,
           label: 'Fiscal Periods',

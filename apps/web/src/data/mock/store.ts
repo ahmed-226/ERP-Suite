@@ -10,6 +10,9 @@ import {
   type AccountLedgerFilter,
   type AccountLedgerReport,
   type AdjustmentInput,
+  type BalanceSheetFilter,
+  type BalanceSheetReport,
+  type CashFlowStatementReport,
   type AuthUser,
   type CreateAccountInput,
   type CreateFiscalPeriodInput,
@@ -20,6 +23,7 @@ import {
   type CreateWarehouseInput,
   type DashboardStats,
   type EntryType,
+  type FinancialStatementFilter,
   type FiscalEvent,
   type FiscalPeriod,
   type FiscalYear,
@@ -41,6 +45,7 @@ import {
   type MovementType,
   type Product,
   type ProductFilter,
+  type ProfitAndLossReport,
   type ReceiptInput,
   type ReopenPeriodInput,
   type StockFilter,
@@ -1829,6 +1834,188 @@ export class MockStore {
         (a, b) => a.period.localeCompare(b.period) || a.movementType.localeCompare(b.movementType),
       );
     return { rows };
+  }
+
+  async profitAndLoss(filter: FinancialStatementFilter): Promise<ProfitAndLossReport> {
+    await this.wait();
+    const revenueMap = new Map<string, { accountId: string; accountCode: string; accountName: string; amount: Decimal }>();
+    const expenseMap = new Map<string, { accountId: string; accountCode: string; accountName: string; amount: Decimal }>();
+
+    for (const entry of this.journals) {
+      if (entry.status !== 'POSTED') continue;
+      if (entry.referenceType === 'YEAR_END_CLOSE') continue;
+      if (entry.entryDate < filter.from || entry.entryDate > filter.to) continue;
+      for (const line of entry.lines) {
+        const account = this.accountById(line.accountId);
+        if (account.accountType !== 'REVENUE' && account.accountType !== 'EXPENSE') continue;
+        const map = account.accountType === 'REVENUE' ? revenueMap : expenseMap;
+        const row = map.get(account.accountId) ?? {
+          accountId: account.accountId,
+          accountCode: account.accountCode,
+          accountName: account.accountName,
+          amount: new Decimal(0),
+        };
+        if (account.accountType === 'REVENUE') {
+          row.amount = line.entryType === 'CREDIT' ? row.amount.plus(line.amount) : row.amount.minus(line.amount);
+        } else {
+          row.amount = line.entryType === 'DEBIT' ? row.amount.plus(line.amount) : row.amount.minus(line.amount);
+        }
+        map.set(account.accountId, row);
+      }
+    }
+
+    const toRows = (map: typeof revenueMap) =>
+      [...map.values()]
+        .map((r) => ({ accountId: r.accountId, accountCode: r.accountCode, accountName: r.accountName, amount: moneyToNumber(r.amount) }))
+        .filter((r) => r.amount !== 0)
+        .sort((a, b) => a.accountCode.localeCompare(b.accountCode));
+    const revenue = toRows(revenueMap);
+    const expenses = toRows(expenseMap);
+    const totalRevenue = moneyToNumber(sumMoney(revenue.map((r) => r.amount)));
+    const totalExpenses = moneyToNumber(sumMoney(expenses.map((r) => r.amount)));
+    return {
+      from: filter.from,
+      to: filter.to,
+      revenue,
+      expenses,
+      totalRevenue,
+      totalExpenses,
+      netIncome: moneyToNumber(money(totalRevenue).minus(totalExpenses)),
+    };
+  }
+
+  async balanceSheet(filter: BalanceSheetFilter): Promise<BalanceSheetReport> {
+    await this.wait();
+    const byAccount = new Map<string, { accountId: string; accountCode: string; accountName: string; accountType: string; debit: Decimal; credit: Decimal }>();
+    for (const entry of this.journals) {
+      if (entry.status !== 'POSTED') continue;
+      if (entry.entryDate > filter.asOf) continue;
+      for (const line of entry.lines) {
+        const account = this.accountById(line.accountId);
+        const row = byAccount.get(account.accountId) ?? {
+          accountId: account.accountId,
+          accountCode: account.accountCode,
+          accountName: account.accountName,
+          accountType: account.accountType,
+          debit: new Decimal(0),
+          credit: new Decimal(0),
+        };
+        if (line.entryType === 'DEBIT') row.debit = row.debit.plus(line.amount);
+        else row.credit = row.credit.plus(line.amount);
+        byAccount.set(account.accountId, row);
+      }
+    }
+
+    const sectionRows = (types: string[], creditNormal: boolean) =>
+      [...byAccount.values()]
+        .filter((a) => types.includes(a.accountType))
+        .map((a) => ({
+          accountId: a.accountId,
+          accountCode: a.accountCode,
+          accountName: a.accountName,
+          amount: moneyToNumber(creditNormal ? a.credit.minus(a.debit) : a.debit.minus(a.credit)),
+        }))
+        .filter((r) => r.amount !== 0)
+        .sort((a, b) => a.accountCode.localeCompare(b.accountCode));
+
+    const assets = sectionRows(['ASSET'], false);
+    const liabilities = sectionRows(['LIABILITY'], true);
+    const equityAccounts = sectionRows(['EQUITY'], true);
+
+    let revenueNet = new Decimal(0);
+    let expenseNet = new Decimal(0);
+    for (const a of byAccount.values()) {
+      if (a.accountType === 'REVENUE') revenueNet = revenueNet.plus(a.credit.minus(a.debit));
+      if (a.accountType === 'EXPENSE') expenseNet = expenseNet.plus(a.debit.minus(a.credit));
+    }
+    const currentEarnings = moneyToNumber(revenueNet.minus(expenseNet));
+    const equityLines = currentEarnings !== 0
+      ? [...equityAccounts, { accountId: 'current-earnings', accountCode: '', accountName: 'Current Year Earnings', amount: currentEarnings }]
+          .sort((a, b) => a.accountCode.localeCompare(b.accountCode) || a.accountName.localeCompare(b.accountName))
+      : equityAccounts;
+
+    const totalAssets = moneyToNumber(sumMoney(assets.map((r) => r.amount)));
+    const totalLiabilities = moneyToNumber(sumMoney(liabilities.map((r) => r.amount)));
+    const totalEquity = moneyToNumber(sumMoney(equityLines.map((r) => r.amount)));
+    const totalLiabilitiesAndEquity = moneyToNumber(money(totalLiabilities).plus(totalEquity));
+    const difference = moneyToNumber(money(totalAssets).minus(totalLiabilitiesAndEquity));
+    return {
+      asOf: filter.asOf,
+      assets: { lines: assets, total: totalAssets },
+      liabilities: { lines: liabilities, total: totalLiabilities },
+      equity: { lines: equityLines, total: totalEquity },
+      totalLiabilitiesAndEquity,
+      balanced: difference === 0,
+      difference,
+    };
+  }
+
+  async cashFlow(filter: FinancialStatementFilter): Promise<CashFlowStatementReport> {
+    await this.wait();
+    const root1000 = this.accounts.find((a) => a.accountCode === '1000');
+    const cashIds = new Set<string>();
+    if (root1000) {
+      cashIds.add(root1000.accountId);
+      for (const a of this.accounts) {
+        if (a.parentAccountId === root1000.accountId) cashIds.add(a.accountId);
+      }
+    } else {
+      for (const a of this.accounts) if (a.accountCode === '1010') cashIds.add(a.accountId);
+    }
+
+    let openingCash = new Decimal(0);
+    const operating: { label: string; amount: number; referenceType?: string | null }[] = [];
+    const investing: { label: string; amount: number; referenceType?: string | null }[] = [];
+    const financing: { label: string; amount: number; referenceType?: string | null }[] = [];
+
+    const classify = (lines: { accountId: string }[]): 'operating' | 'investing' | 'financing' => {
+      const nonCash = lines
+        .filter((l) => !cashIds.has(l.accountId))
+        .map((l) => this.accountById(l.accountId));
+      if (nonCash.some((a) => a.accountType === 'EQUITY')) return 'financing';
+      if (nonCash.some((a) => a.accountType === 'REVENUE' || a.accountType === 'EXPENSE' || a.accountType === 'LIABILITY')) return 'operating';
+      if (nonCash.some((a) => a.accountType === 'ASSET')) return 'operating';
+      return 'investing';
+    };
+
+    const entries = this.journals
+      .filter((e) => e.status === 'POSTED' && e.entryDate <= filter.to)
+      .sort((a, b) => a.entryDate.localeCompare(b.entryDate) || a.entryNumber.localeCompare(b.entryNumber));
+
+    for (const entry of entries) {
+      let cashDelta = new Decimal(0);
+      for (const line of entry.lines) {
+        if (!cashIds.has(line.accountId)) continue;
+        cashDelta = line.entryType === 'DEBIT' ? cashDelta.plus(line.amount) : cashDelta.minus(line.amount);
+      }
+      if (cashDelta.isZero()) continue;
+      if (entry.entryDate < filter.from) {
+        openingCash = openingCash.plus(cashDelta);
+        continue;
+      }
+      const bucket = classify(entry.lines);
+      const item = { label: entry.referenceType ?? 'Journal entry', amount: moneyToNumber(cashDelta), referenceType: entry.referenceType ?? null };
+      if (bucket === 'operating') operating.push(item);
+      else if (bucket === 'financing') financing.push(item);
+      else investing.push(item);
+    }
+
+    const sumItems = (items: { amount: number }[]) => moneyToNumber(sumMoney(items.map((i) => i.amount)));
+    const operatingTotal = sumItems(operating);
+    const investingTotal = sumItems(investing);
+    const financingTotal = sumItems(financing);
+    const netChange = moneyToNumber(money(operatingTotal).plus(investingTotal).plus(financingTotal));
+    const closingCash = moneyToNumber(openingCash.plus(netChange));
+    return {
+      from: filter.from,
+      to: filter.to,
+      openingCash: moneyToNumber(openingCash),
+      closingCash,
+      netChange,
+      operating: { lines: operating, total: operatingTotal },
+      investing: { lines: investing, total: investingTotal },
+      financing: { lines: financing, total: financingTotal },
+    };
   }
 
   async inventoryAging(filter: InventoryAgingFilter = {}): Promise<InventoryAgingReport> {
